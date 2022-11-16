@@ -14,7 +14,6 @@ from modules.args import parser
 from modules.dataset.datasets import Item
 from modules.model import load_model
 
-logging.basicConfig(level="INFO")
 logger = logging.getLogger()
 
 
@@ -206,4 +205,5 @@ def main(args, config):
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level="INFO")
     main(*get_params())
