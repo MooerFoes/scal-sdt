@@ -17,10 +17,6 @@ from modules.model import load_model
 logging.basicConfig(level="INFO")
 logger = logging.getLogger()
 
-import pydevd_pycharm
-
-pydevd_pycharm.settrace('10.0.0.1', port=1145, stdoutToServer=True, stderrToServer=True)
-
 
 def get_resuming_config(config: DictConfig) -> DictConfig | None:
     state_dir = Path(config.model, "state")
