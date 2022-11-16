@@ -1,5 +1,5 @@
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -7,7 +7,7 @@ import numpy as np
 @dataclass
 class Bucket:
     size: tuple[int, int]
-    ids = list[str]()
+    ids: list[str] = field(default_factory=list[str])
 
     @property
     def aspect(self):
@@ -31,10 +31,7 @@ class BucketManager:
         epoch_seed = self.prng.tomaxint() % (2 ** 32 - 1)
         self.epoch_prng = self.get_prng(epoch_seed)  # separate prng for sharding use for increased thread resilience
         self.batch_delivered = None
-
         self.debug = debug
-
-        self.start_epoch()
 
     @staticmethod
     def get_prng(seed):

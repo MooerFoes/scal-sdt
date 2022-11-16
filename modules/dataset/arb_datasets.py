@@ -1,6 +1,7 @@
 import random
 from collections.abc import Iterable
 from logging import getLogger
+from pathlib import Path
 
 import torch
 import torch.utils
@@ -20,7 +21,7 @@ class SDDatasetWithARB(torch.utils.data.IterableDataset, SDDataset):
         self.debug = debug
         self.batch_size = batch_size
 
-        id_size_map = self.get_id_size_map(self.entries)
+        id_size_map = self.get_id_size_map((entry.path for entry in self.entries))
         self.id_entry_map: dict[str, Item] = {str(entry.path): entry for entry in self.entries}
 
         bucket_manager = BucketManager(batch_size=batch_size, seed=seed, debug=debug)
@@ -33,14 +34,14 @@ class SDDatasetWithARB(torch.utils.data.IterableDataset, SDDataset):
         return self._length // self.batch_size
 
     @staticmethod
-    def get_id_size_map(entries: Iterable[Item]):
+    def get_id_size_map(paths: Iterable[Path]):
         path_size_map = {}
 
-        for entry in tqdm(entries, desc="Loading resolution from entries"):
-            entry: Item
-            with Image.open(entry.path) as img:
+        for path in tqdm(paths, desc="Loading resolution from entries"):
+            path: Path
+            with Image.open(path) as img:
                 size = img.size
-            path_size_map[str(entry.path)] = size
+            path_size_map[str(path)] = size
 
         return path_size_map
 
@@ -99,7 +100,7 @@ class DBDatasetWithARB(DBDataset, SDDatasetWithARB):
 
         self.class_bucket_entry_map = dict[tuple[int, int], list[Item]]()
 
-        class_id_size_map = self.get_id_size_map(self.class_entries)
+        class_id_size_map = self.get_id_size_map((entry.path for entry in self.class_entries))
         class_id_entry_map: dict[str, Item] = {str(entry.path): entry for entry in self.class_entries}
 
         class_bucket_manager = BucketManager(batch_size=1, seed=seed, debug=debug)

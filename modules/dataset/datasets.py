@@ -13,10 +13,11 @@ from transformers import CLIPTokenizer
 @dataclass
 class Item:
     path: Path
-    image: torch.Tensor | None
     token_ids: list[int]
-    latent: torch.Tensor | None
-    condition: torch.Tensor | None
+    # Cache
+    image: torch.Tensor | None = None
+    latent: torch.Tensor | None = None
+    condition: torch.Tensor | None = None
 
 
 class SDDataset(Dataset):
@@ -71,11 +72,13 @@ class SDDataset(Dataset):
             max_length=self.tokenizer.model_max_length,
         ).input_ids
 
-    def resolve_dataset(self, dataset):
-        for x in Path(dataset.path).iterdir():
-            if not (x.is_file() and x.suffix != ".txt"):
-                continue
+    @staticmethod
+    def get_images(path: Path):
+        assert path.is_dir()
+        return (x for x in path.iterdir() if x.is_file() and x.suffix != ".txt")
 
+    def resolve_dataset(self, dataset):
+        for x in self.get_images(Path(dataset.path)):
             if dataset.combine_prompt_from_txt:
                 content = x.with_suffix('.txt').read_text()
                 prompt = SDDataset.combine_prompt(dataset.prompt, content, dataset.prompt_combine_template)
@@ -84,7 +87,7 @@ class SDDataset(Dataset):
 
             token_ids = self.tokenize(prompt)
 
-            yield Item(x, None, token_ids, None, None)
+            yield Item(path=x, token_ids=token_ids)
 
     # def do_cache(self, vae: AutoencoderKL, text_encoder: CLIPWithSkip = None):
     #     train_dataloader = torch.utils.data.DataLoader(
