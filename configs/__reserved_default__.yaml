@@ -1,0 +1,65 @@
+model: ???
+vae: null
+tokenizer: null
+output_dir: 'output'
+project: 'SCAL-SDT'
+
+data:
+  resolution: 512
+  center_crop: false
+  concepts: [ ]
+
+checkpoint:
+  filename: '{epoch}-{train/loss:.2f}'
+  auto_insert_metric_name: true
+  every_n_epochs: 1
+
+trainer:
+  accelerator: gpu
+  devices: -1
+  auto_select_gpus: true
+  precision: 16
+  move_metrics_to_cpu: true
+
+batch_size: 1
+seed: None
+
+prior_preservation:
+  enabled: false
+  prior_loss_weight: 1.0
+
+train_text_encoder: false
+gradient_checkpointing: false
+
+aspect_ratio_bucket:
+  enabled: false
+  debug: false
+
+clip_skip: 1
+pad_tokens: true
+
+loggers: { }
+
+optimizer:
+  name: bitsandbytes.optim.AdamW8bit
+  params:
+    lr: 5e-6
+    beta1: 0.9
+    beta2: 0.999
+    weight_decay: 1e-2
+    eps: 1e-8
+  lr_scale:
+    enabled: true
+    method: 'sqrt'
+  lr_scheduler:
+    name: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
+    params:
+      T_0: 10
+      T_mult: 1
+      eta_min: 7e-8
+      last_epoch: -1
+    warmup:
+      enabled: true
+      init_lr: 7e-8
+      steps: 100
+      strategy: 'linear'

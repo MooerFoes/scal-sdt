@@ -1,0 +1,102 @@
+model: 'path/to/model' # Or HuggingFace model identifier
+
+# vae: 'path/to/vae'
+# tokenizer: 'path/to/tokenizer'
+
+# Checkpoints will be saved in <output dir>/<project>/<run id>. For run id, see args.
+output_dir: 'output'
+project: 'SCAL-SDT'
+
+data:
+  resolution: 512
+  center_crop: false
+  concepts:
+    # You can add more concepts
+    - instance_set:
+        path: 'example/data/instance'
+        prompt: 'sks 1girl'
+        combine_prompt_from_txt: false
+        prompt_combine_template: '{PROMPT}, {TXT_PROMPT}'
+      class_set:
+        path: 'example/data/class'
+        prompt: '1girl'
+        combine_prompt_from_txt: false
+        prompt_combine_template: '{PROMPT}, {TXT_PROMPT}'
+        auto_generate:
+          enabled: true
+          negative_prompt: 'lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry'
+          steps: 28
+          cfg_scale: 11
+          num_target: 100
+          batch_size: 1
+
+sampling:
+  interval_steps: 50
+  batch_size: 1
+  concepts:
+    - prompt: 'sks 1girl, sitting'
+      negative_prompt: 'lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry'
+      steps: 28
+      cfg_scale: 11
+      num_samples: 8
+      seed: 114514
+
+checkpoint:
+  filename: '{epoch}-{val/loss:.2f}'
+  auto_insert_metric_name: true
+  # every_n_train_steps: 1145
+  every_n_epochs: 10
+
+trainer:
+  accelerator: gpu
+  devices: -1
+  auto_select_gpus: true
+  precision: 16
+  move_metrics_to_cpu: true
+
+batch_size: 2
+seed: 114514
+
+# How to enable "DreamBooth"? Here's another fancy name for it.
+prior_preservation:
+  enabled: true
+  prior_loss_weight: 1.0
+
+train_text_encoder: false
+
+aspect_ratio_bucket:
+  enabled: false
+  debug: false
+
+clip_skip: 2
+pad_tokens: true
+
+loggers:
+  wandb:
+    sample: true
+    artifact: false
+    remove_ckpt_after_upload: false
+
+optimizer:
+  name: bitsandbytes.optim.AdamW8bit
+  params:
+    lr: 5e-6
+    beta1: 0.9
+    beta2: 0.999
+    weight_decay: 1e-2
+    eps: 1e-8
+  lr_scale:
+    enabled: true
+    method: 'sqrt'
+  lr_scheduler:
+    name: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
+    params:
+      T_0: 10
+      T_mult: 1
+      eta_min: 7e-8
+      last_epoch: -1
+    warmup:
+      enabled: true
+      init_lr: 7e-8
+      steps: 100
+      strategy: 'linear'

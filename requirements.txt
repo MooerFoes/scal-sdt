@@ -1,0 +1,10 @@
+transformers~=4.21
+accelerate~=0.13
+ftfy~=6.1
+bitsandbytes~=0.35
+omegaconf~=2.2
+einops~=0.5
+pytorch-lightning~=1.8
+numpy~=1.21
+Pillow~=9.3
+tqdm~=4.64
