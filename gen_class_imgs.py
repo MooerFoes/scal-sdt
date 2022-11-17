@@ -4,10 +4,14 @@ from pathlib import Path
 
 import click
 import torch
+from PIL.Image import Image
+from diffusers import AutoencoderKL, UNet2DConditionModel
 from diffusers.pipelines import StableDiffusionPipeline
 from omegaconf import OmegaConf
 from tqdm import tqdm
+from transformers import CLIPTokenizer
 
+from modules.clip import CLIPWithSkip
 from modules.dataset.arb_datasets import SDDatasetWithARB
 from modules.dataset.bucket import BucketManager
 from modules.dataset.datasets import SDDataset
@@ -24,11 +28,18 @@ def generate_class_images(pipeline: StableDiffusionPipeline, concept, size_dist:
     cur_class_images = list(SDDataset.get_images(class_images_dir))
     class_id_size_map = SDDatasetWithARB.get_id_size_map(cur_class_images)
 
-    cur_dist = {size: len([k for k, v in class_id_size_map.items() if v == size]) for id, size in
+    cur_dist = {size: len([k for k in class_id_size_map.keys() if class_id_size_map[k] == size]) for id, size in
                 class_id_size_map.items()}
-    target_dist = {size: int(autogen_config.num_target * p) for size, p in size_dist.items()}
+
+    logging.info(f"Current distribution:\n{cur_dist}")
+
+    target_dist = {size: round(autogen_config.num_target * p) for size, p in size_dist.items()}
+
+    logging.info(f"Target distribution:\n{target_dist}")
 
     dist_diff = {k: v - cur_dist.get(k, 0) for k, v in target_dist.items() if v > cur_dist.get(k, 0)}
+
+    logging.info(f"Distribution diff:\n{dist_diff}")
 
     num_new_images = sum(dist_diff.values())
     logger.info(f"Total number of class images to sample: {num_new_images}.")
@@ -45,7 +56,7 @@ def generate_class_images(pipeline: StableDiffusionPipeline, concept, size_dist:
                 if actual_bs <= 0:
                     break
 
-                images = pipeline(
+                images: list[Image] = pipeline(
                     prompt=concept.class_set.prompt,
                     negative_prompt=autogen_config.negative_prompt,
                     guidance_scale=autogen_config.cfg_scale,
@@ -58,9 +69,9 @@ def generate_class_images(pipeline: StableDiffusionPipeline, concept, size_dist:
                 for image in images:
                     hash = hashlib.md5(image.tobytes()).hexdigest()
                     image_filename = class_images_dir / f"{hash}.jpg"
-                    image.save(image_filename)
-                    progress.update()
+                    image.save(image_filename, quality=93)
 
+                progress.update(actual_bs)
                 target -= actual_bs
 
 
@@ -74,11 +85,46 @@ def main(config):
         logger.warning("Prior preservation not enabled. Class image generation is not needed.")
         return
 
-    pipeline = StableDiffusionPipeline.from_pretrained(config.model)
+    unet = UNet2DConditionModel.from_pretrained(config.model, subfolder="unet")
+    unet.half()
+    unet.set_use_memory_efficient_attention_xformers(True)
+
+    # scheduler = PNDMScheduler(
+    #     beta_start=0.00085,
+    #     beta_end=0.0120,
+    #     beta_schedule="scaled_linear",
+    #     num_train_timesteps=1000,
+    #     skip_prk_steps=True
+    # )
+
+    # from diffusers.schedulers.scheduling_ddim import DDIMScheduler
+    # scheduler = DDIMScheduler.from_config(config.model)
+
+    # from diffusers.schedulers.scheduling_lms_discrete import LMSDiscreteScheduler
+    # scheduler = LMSDiscreteScheduler(
+    #     beta_start=0.00085,
+    #     beta_end=0.0120,
+    #     beta_schedule="scaled_linear"
+    # )
+
+    from diffusers.schedulers.scheduling_euler_ancestral_discrete import EulerAncestralDiscreteScheduler
+    scheduler = EulerAncestralDiscreteScheduler(
+        num_train_timesteps=1000,
+        beta_start=0.00085,
+        beta_end=0.0120,
+        beta_schedule="scaled_linear"
+    )
+
+    pipeline = StableDiffusionPipeline(
+        unet=unet,
+        vae=AutoencoderKL.from_pretrained(config.vae if config.vae else config.model, subfolder="vae"),
+        text_encoder=CLIPWithSkip.from_pretrained(config.model, subfolder="text_encoder"),
+        tokenizer=CLIPTokenizer.from_pretrained(config.tokenizer if config.tokenizer else config.model,
+                                                subfolder="tokenizer"),
+        scheduler=scheduler
+    )
     pipeline.set_progress_bar_config(disable=True)
     pipeline.to("cuda")
-    pipeline.unet.half()
-    pipeline.unet.set_use_memory_efficient_attention_xformers(True)
 
     for i, concept in enumerate(config.data.concepts):
         if not concept.class_set.auto_generate.enabled:
