@@ -33,7 +33,7 @@ class CLIPWithSkip(CLIPTextModel):
                                                                  return_dict=True)
             hidden_state = result.hidden_states[-self.skip]
             hidden_state = self.text_model.final_layer_norm(hidden_state)
-            pooled_output = result[torch.arange(hidden_state.shape[0]), input_ids.argmax(dim=-1)]
+            pooled_output = hidden_state[torch.arange(hidden_state.shape[0]), input_ids.argmax(dim=-1)]
 
             if not return_dict:
                 return hidden_state, pooled_output
