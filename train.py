@@ -8,6 +8,7 @@ import torch.utils.checkpoint
 import torch.utils.data
 from omegaconf import OmegaConf, DictConfig
 from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import WandbLogger
 from transformers import CLIPTokenizer
 
 from modules.args import parser
@@ -164,9 +165,6 @@ def main(args, config):
     if config.seed:
         pl.seed_everything(config.seed)
 
-    # TODO
-    # if config.prior_preservation.enabled:
-    #     generate_class_images(concepts, args, noise_scheduler)
     model = load_model(config)
 
     train_dataset = get_dataset(config, model.tokenizer)
@@ -186,11 +184,11 @@ def main(args, config):
         collate_fn=collate_fn
     )
 
-    # train_logger = WandbLogger(project=config.project)
+    train_logger = WandbLogger(project=config.project)
 
     trainer = pl.Trainer.from_argparse_args(
         args,
-        # logger=train_logger,
+        logger=train_logger,
         callbacks=[checkpoint_callback],
         benchmark=not config.aspect_ratio_bucket.enabled,
         **config.trainer
