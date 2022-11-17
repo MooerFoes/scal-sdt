@@ -42,10 +42,12 @@ sampling:
       seed: 114514
 
 checkpoint:
-  filename: '{epoch}-{val/loss:.2f}'
+  filename: '{epoch}-{train_loss:.2f}'
   auto_insert_metric_name: true
   # every_n_train_steps: 1145
   every_n_epochs: 10
+  save_top_k: 5
+  monitor: 'epoch'
 
 trainer:
   accelerator: gpu
@@ -68,7 +70,7 @@ aspect_ratio_bucket:
   enabled: false
   debug: false
 
-clip_skip: 2
+clip_stop_at_layer: 2
 pad_tokens: true
 
 loggers:

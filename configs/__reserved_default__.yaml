@@ -10,7 +10,7 @@ data:
   concepts: [ ]
 
 checkpoint:
-  filename: '{epoch}-{train/loss:.2f}'
+  filename: '{epoch}-{train_loss:.2f}'
   auto_insert_metric_name: true
   every_n_epochs: 1
 
@@ -35,7 +35,7 @@ aspect_ratio_bucket:
   enabled: false
   debug: false
 
-clip_skip: 1
+clip_stop_at_layer: 1
 pad_tokens: true
 
 loggers: { }

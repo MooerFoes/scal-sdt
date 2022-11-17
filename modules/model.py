@@ -67,6 +67,8 @@ def load_model(config):
                                               subfolder="tokenizer")
     noise_scheduler = DDIMScheduler.from_config(config.model, subfolder="scheduler")
 
+    text_encoder.stop_at_layer = config.clip_stop_at_layer
+
     return StableDiffusionModel(config, unet, vae, text_encoder, tokenizer, noise_scheduler)
 
 

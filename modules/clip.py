@@ -7,7 +7,7 @@ from transformers.modeling_outputs import BaseModelOutputWithPooling
 
 
 class CLIPWithSkip(CLIPTextModel):
-    skip = 1
+    stop_at_layer = 1
 
     def _reorder_cache(self, past, beam_idx):
         super()._reorder_cache(past, beam_idx)
@@ -27,23 +27,26 @@ class CLIPWithSkip(CLIPTextModel):
             output_hidden_states: Optional[bool] = None,
             return_dict: Optional[bool] = None,
     ) -> Union[Tuple, BaseModelOutputWithPooling]:
-        if self.skip > 1:
-            result: BaseModelOutputWithPooling = super().forward(input_ids, attention_mask, position_ids,
-                                                                 output_attentions, output_hidden_states=True,
-                                                                 return_dict=True)
-            hidden_state = result.hidden_states[-self.skip]
-            hidden_state = self.text_model.final_layer_norm(hidden_state)
-            pooled_output = hidden_state[torch.arange(hidden_state.shape[0]), input_ids.argmax(dim=-1)]
-
-            if not return_dict:
-                return hidden_state, pooled_output
-
-            return BaseModelOutputWithPooling(
-                last_hidden_state=hidden_state,
-                pooler_output=pooled_output,
-                hidden_states=result.hidden_states,
-                attentions=result.attentions,
-            )
-        else:
+        if self.stop_at_layer == 1:
             return super().forward(input_ids, attention_mask, position_ids, output_attentions, output_hidden_states,
                                    return_dict)
+
+        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
+        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+
+        result: BaseModelOutputWithPooling = super().forward(input_ids, attention_mask, position_ids,
+                                                             output_attentions, output_hidden_states=True,
+                                                             return_dict=True)
+        hidden_state = result.hidden_states[-self.stop_at_layer]
+        hidden_state = self.text_model.final_layer_norm(hidden_state)
+        pooled_output = hidden_state[torch.arange(hidden_state.shape[0]), input_ids.argmax(dim=-1)]
+
+        if not return_dict:
+            return hidden_state, pooled_output
+
+        return BaseModelOutputWithPooling(
+            last_hidden_state=hidden_state,
+            pooler_output=pooled_output,
+            hidden_states=result.hidden_states,
+            attentions=result.attentions,
+        )

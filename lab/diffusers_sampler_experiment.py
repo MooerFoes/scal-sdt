@@ -89,7 +89,7 @@ def main(config):
         config.model,
         subfolder="text_encoder",
     )
-    text_encoder.skip = 1
+    text_encoder.stop_at_layer = 1
 
     tokenizer: CLIPTokenizer = CLIPTokenizer.from_pretrained(
         config.tokenizer if config.tokenizer else config.model,
