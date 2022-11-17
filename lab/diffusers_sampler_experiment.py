@@ -48,6 +48,14 @@ def get_scheduler():
     #     beta_schedule="scaled_linear"
     # )
 
+    # from diffusers.schedulers.scheduling_euler_discrete import EulerDiscreteScheduler
+    # scheduler = EulerDiscreteScheduler(
+    #     num_train_timesteps=1000,
+    #     beta_start=0.00085,
+    #     beta_end=0.0120,
+    #     beta_schedule="scaled_linear"
+    # )
+
     from diffusers.schedulers.scheduling_euler_ancestral_discrete import EulerAncestralDiscreteScheduler
     scheduler = EulerAncestralDiscreteScheduler(
         num_train_timesteps=1000,
