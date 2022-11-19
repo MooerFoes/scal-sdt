@@ -1,27 +1,31 @@
 # Copy pasted from https://github.com/lehduong/torch-warmup-lr/blob/master/torch_warmup_lr/wrappers.py with modifications
 
 import math
+from typing import Literal
 
 from torch.optim.lr_scheduler import _LRScheduler
 
 
 class WarmupLR(_LRScheduler):
-    def __init__(self, scheduler, init_lr=1e-3, num_warmup=1, warmup_strategy='linear'):
-        if warmup_strategy not in ['linear', 'cos', 'constant']:
-            raise ValueError(
-                "Expect warmup_strategy to be one of ['linear', 'cos', 'constant'] but got {}".format(warmup_strategy))
+    _warmup_last_epoch = 0
+
+    def __init__(self, scheduler, init_lr=1e-3,
+                 num_warmup=1, warmup_strategy: Literal['linear', 'cosine', 'constant'] = 'constant'):
         self._scheduler = scheduler
         self._init_lr = init_lr
         self._num_warmup = num_warmup
         self._step_count = 0
         # Define the strategy to warm up learning rate
         self._warmup_strategy = warmup_strategy
-        if warmup_strategy == 'cos':
+        if warmup_strategy == 'cosine':
             self._warmup_func = self._warmup_cos
         elif warmup_strategy == 'linear':
             self._warmup_func = self._warmup_linear
-        else:
+        elif warmup_strategy == 'cosine':
             self._warmup_func = self._warmup_const
+        else:
+            raise ValueError(
+                f"Expect warmup_strategy to be one of ['linear', 'cosine', 'constant'] but got {warmup_strategy}")
         # save initial learning rate of each param group
         # only useful when each param groups having different learning rate
         self._format_param()
@@ -37,7 +41,7 @@ class WarmupLR(_LRScheduler):
         wrapper_state_dict = {key: value for key, value in self.__dict__.items() if
                               (key != 'optimizer' and key != '_scheduler')}
         wrapped_state_dict = {key: value for key, value in self._scheduler.__dict__.items() if key != 'optimizer'}
-        return {'wrapped': wrapped_state_dict, 'wrapper': wrapper_state_dict}
+        return {'scheduler': wrapped_state_dict, 'warmup': wrapper_state_dict}
 
     def load_state_dict(self, state_dict):
         """Loads the schedulers state.
@@ -45,8 +49,8 @@ class WarmupLR(_LRScheduler):
             state_dict (dict): scheduler state. Should be an object returned
                 from a call to :meth:`state_dict`.
         """
-        self.__dict__.update(state_dict['wrapper'])
-        self._scheduler.__dict__.update(state_dict['wrapped'])
+        self.__dict__.update(state_dict['warmup'])
+        self._scheduler.__dict__.update(state_dict['scheduler'])
 
     def _format_param(self):
         # learning rate of each param group will increase
@@ -82,11 +86,12 @@ class WarmupLR(_LRScheduler):
             lrs = self._scheduler.get_lr()
         return lrs
 
-    def step(self, *args):
+    def step(self, epoch):
         if self._step_count <= self._num_warmup:
             values = self.get_lr()
             for param_group, lr in zip(self._scheduler.optimizer.param_groups, values):
                 param_group['lr'] = lr
             self._step_count += 1
+            self._warmup_last_epoch = epoch
         else:
-            self._scheduler.step(*args)
+            self._scheduler.step(epoch - self._warmup_last_epoch)
