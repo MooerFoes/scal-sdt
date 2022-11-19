@@ -1,5 +1,6 @@
 import itertools
 import math
+from contextlib import nullcontext
 from typing import Any
 
 import pytorch_lightning as pl
@@ -91,6 +92,9 @@ class StableDiffusionModel(pl.LightningModule):
         self.vae.requires_grad_(False)
         if not config.train_text_encoder:
             self.text_encoder.requires_grad_(False)
+            self._text_encode_context = torch.no_grad()
+        else:
+            self._text_encode_context = nullcontext()
 
         if config.gradient_checkpointing:
             unet.enable_gradient_checkpointing()
@@ -99,9 +103,21 @@ class StableDiffusionModel(pl.LightningModule):
 
         self.unet.set_use_memory_efficient_attention_xformers(True)
 
-    @torch.inference_mode()
-    def vae_encode(self, image):
-        return self.vae.encode(image).latent_dist.sample() * 0.18215
+        self.save_hyperparameters(config)
+
+    @torch.no_grad()
+    def _vae_encode(self, image):
+        device = self.unet.device
+        self.unet.cpu()
+
+        latents = self.vae.encode(image).latent_dist.sample() * 0.18215
+
+        self.unet.to(device)
+        return latents
+
+    def _encode_token_ids(self, token_ids):
+        with self._text_encode_context:
+            return self.text_encoder.forward(token_ids).last_hidden_state
 
     # @rank_zero_only
     # def log_samples(self):
@@ -145,14 +161,14 @@ class StableDiffusionModel(pl.LightningModule):
         #     latents = batch.latents
         # else:
         #     latents = self.vae_encode(batch["images"])
-        latents = self.vae_encode(batch["images"])
+        latents = self._vae_encode(batch["images"])
 
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents)
         bsz = latents.shape[0]
         # Sample a random timestep for each image
-        timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bsz,), device=latents.device)
-        timesteps = timesteps.long()
+        timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bsz,),
+                                  dtype=torch.int64, device=latents.device)
 
         # Add noise to the latents according to the noise magnitude at each timestep
         # (this is the forward diffusion process)
@@ -163,8 +179,7 @@ class StableDiffusionModel(pl.LightningModule):
         #     conds = self.text_encoder.forward(batch["token_ids"])
         # else:
         #     conds = batch.conds
-        with torch.no_grad():
-            conds = self.text_encoder.forward(batch["token_ids"]).last_hidden_state
+        conds = self._encode_token_ids(batch["token_ids"])
 
         # Predict the noise residual
         noise_pred = self.unet(noisy_latents, timesteps, conds).sample
@@ -185,6 +200,10 @@ class StableDiffusionModel(pl.LightningModule):
         else:
             loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")
 
+        self.log_dict({
+            "train_loss": loss,
+            "lr": self.lr_schedulers().get_lr()[0]
+        })
         return loss
 
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any:
@@ -198,4 +217,17 @@ class StableDiffusionModel(pl.LightningModule):
             if self.config.train_text_encoder else self.unet.parameters()
         optimizer = get_optimizer(params_to_optimize, self.config, self.trainer)
         lr_scheduler = get_lr_scheduler(self.config, optimizer)
-        return [optimizer], [lr_scheduler]
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": lr_scheduler,
+                "interval": "step",
+                "frequency": 1
+            }
+        }
+
+    def optimizer_zero_grad(self, epoch, batch_idx, optimizer, optimizer_idx):
+        optimizer.zero_grad(set_to_none=True)
+
+    def lr_scheduler_step(self, scheduler, optimizer_idx, metric):
+        scheduler.step(epoch=self.trainer.global_step / self.trainer.num_training_batches)
