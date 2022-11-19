@@ -61,54 +61,51 @@ def get_params():
     return args, config
 
 
-def get_collate_fn(tokenizer: CLIPTokenizer):
-    def collate_fn(batch: Iterable[Item | tuple[Item, Item]]):
-        token_ids_array = list[list[int]]()
-        images_array = list[torch.Tensor]()
+def collate_fn(batch: Iterable[Item | tuple[Item, Item]]):
+    token_ids_array = list[list[int]]()
+    images_array = list[torch.Tensor]()
 
-        # Cache
-        # conditions_array = list[torch.Tensor]()
-        # latents_array = list[torch.Tensor]()
+    # Cache
+    # conditions_array = list[torch.Tensor]()
+    # latents_array = list[torch.Tensor]()
 
-        class_items = []
+    class_items = []
 
-        def append(item: Item):
-            token_ids_array.append(item.token_ids)
-            images_array.append(item.image)
-            # conditions_array.append(item.latent)
-            # latents_array.append(item.condition)
+    def append(item: Item):
+        token_ids_array.append(item.token_ids)
+        images_array.append(item.image)
+        # conditions_array.append(item.latent)
+        # latents_array.append(item.condition)
 
-        for x in batch:
-            if isinstance(x, tuple):
-                x: tuple[Item, Item]
-                instance_item, class_item = x
-                append(instance_item)
-                class_items.append(class_item)
-            else:
-                x: Item
-                append(x)
+    for x in batch:
+        if isinstance(x, tuple):
+            x: tuple[Item, Item]
+            instance_item, class_item = x
+            append(instance_item)
+            class_items.append(class_item)
+        else:
+            x: Item
+            append(x)
 
-        for class_item in class_items:
-            append(class_item)
+    for class_item in class_items:
+        append(class_item)
 
-        images = torch.stack(images_array)
-        images = images.to(dtype=torch.float32, memory_format=torch.contiguous_format)
+    images = torch.stack(images_array)
+    images = images.to(dtype=torch.float32, memory_format=torch.contiguous_format)
 
-        token_ids = tokenizer.pad({"input_ids": token_ids_array}, padding=True, return_tensors="pt").input_ids
+    token_ids = torch.tensor(token_ids_array, dtype=torch.int64)
 
-        # conditions = torch.stack(conditions_array)
-        #
-        # latents = torch.stack(latents_array)
+    # conditions = torch.stack(conditions_array)
+    #
+    # latents = torch.stack(latents_array)
 
-        batch = {
-            "token_ids": token_ids,
-            "images": images,
-            # "conditions": conditions,
-            # "latents": latents
-        }
-        return batch
-
-    return collate_fn
+    batch = {
+        "token_ids": token_ids,
+        "images": images,
+        # "conditions": conditions,
+        # "latents": latents
+    }
+    return batch
 
 
 def get_dataset(config, tokenizer: CLIPTokenizer):
@@ -168,8 +165,6 @@ def main(args, config):
     model = load_model(config)
 
     train_dataset = get_dataset(config, model.tokenizer)
-    checkpoint_callback = ModelCheckpoint(dirpath=ckpt_save_dir, **config.checkpoint)
-
     # TODO
     # if not ("augment" in config.data and any(config.data.augment)):
     # if config.train_text_encoder:
@@ -177,19 +172,21 @@ def main(args, config):
     # else:
     #     train_dataset.do_cache(model.vae, model.text_encoder)
 
-    collate_fn = get_collate_fn(model.tokenizer)
-
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
-        collate_fn=collate_fn
+        batch_size=config.batch_size,
+        collate_fn=collate_fn,
+        num_workers=8
     )
 
     train_logger = WandbLogger(project=config.project)
 
-    trainer = pl.Trainer.from_argparse_args(
+    trainer: pl.Trainer = pl.Trainer.from_argparse_args(
         args,
         logger=train_logger,
-        callbacks=[checkpoint_callback],
+        callbacks=[
+            ModelCheckpoint(dirpath=ckpt_save_dir, **config.checkpoint),
+        ],
         benchmark=not config.aspect_ratio_bucket.enabled,
         **config.trainer
     )

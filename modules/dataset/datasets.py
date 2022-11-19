@@ -108,11 +108,8 @@ class SDDataset(Dataset):
     def __len__(self):
         return len(self.entries)
 
-    def _get_item(self, entries, index):
-        entry = copy.copy(
-            entries[index % len(entries)]
-        )
-
+    def _get_item(self, entry):
+        entry = copy.copy(entry)
         # if not self.cached_latents:
         image = self.read_img(entry.path)
         image = self.image_transforms(image)
@@ -121,7 +118,7 @@ class SDDataset(Dataset):
         return entry
 
     def __getitem__(self, index) -> Item:
-        return self._get_item(self.entries, index)
+        return self._get_item(self.entries[index])
 
     @staticmethod
     def read_img(filepath: Path) -> Image:
@@ -151,7 +148,7 @@ class DBDataset(SDDataset):
 
     def __getitem__(self, index) -> tuple[Item, Item]:
         instance = super().__getitem__(index)
-        class_ = super()._get_item(self.class_entries, index)
+        class_ = super()._get_item(random.choice(self.class_entries))
         return instance, class_
 
     # def do_cache(self, vae: AutoencoderKL, text_encoder: CLIPWithSkip = None):
