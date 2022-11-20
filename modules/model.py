@@ -1,6 +1,8 @@
 import itertools
+import logging
 import math
 from contextlib import nullcontext
+from pathlib import Path
 from typing import Any
 
 import pytorch_lightning as pl
@@ -12,6 +14,8 @@ from diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel, Stable
 from transformers import CLIPTokenizer
 
 from modules.clip import CLIPWithSkip
+
+logger = logging.getLogger()
 
 
 def get_class(name: str):
@@ -60,15 +64,28 @@ def get_lr_scheduler(config, optimizer) -> Any:
     return scheduler
 
 
+def load_df_pipeline(path, vae=None, tokenizer=None):
+    unet = UNet2DConditionModel.from_pretrained(path, subfolder="unet")
+    vae = AutoencoderKL.from_pretrained(vae, subfolder="vae" if not vae else None)
+    text_encoder = CLIPWithSkip.from_pretrained(path, subfolder="text_encoder")
+    tokenizer = CLIPTokenizer.from_pretrained(tokenizer, subfolder="tokenizer" if not tokenizer else None)
+    return unet, vae, text_encoder, tokenizer
+
+
 def load_model(config):
-    unet = UNet2DConditionModel.from_pretrained(config.model, subfolder="unet")
-    vae = AutoencoderKL.from_pretrained(config.vae if config.vae else config.model, subfolder="vae")
-    text_encoder = CLIPWithSkip.from_pretrained(config.model, subfolder="text_encoder")
-    tokenizer = CLIPTokenizer.from_pretrained(config.tokenizer if config.tokenizer else config.model,
-                                              subfolder="tokenizer")
-    noise_scheduler = DDIMScheduler.from_config(config.model, subfolder="scheduler")
+    model_path = Path(config.model)
+
+    if (model_path / "model_index.json").is_file():
+        unet, vae, text_encoder, tokenizer = load_df_pipeline(model_path, config.vae, config.tokenizer)
+    elif model_path.suffix.lower() == ".ckpt":
+        raise NotImplementedError("Loading directly from SD checkpoint is not implemented.")
+    else:
+        raise ValueError("Invalid model. (Not Diffusers format nor SD format)")
+
+    logger.info("Model loaded")
 
     text_encoder.stop_at_layer = config.clip_stop_at_layer
+    noise_scheduler = DDIMScheduler.from_config(config.model, subfolder="scheduler")
 
     return StableDiffusionModel(config, unet, vae, text_encoder, tokenizer, noise_scheduler)
 
