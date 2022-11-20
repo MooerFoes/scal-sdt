@@ -8,12 +8,12 @@ import torch.utils.checkpoint
 import torch.utils.data
 from omegaconf import OmegaConf, DictConfig
 from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.loggers import WandbLogger
 from transformers import CLIPTokenizer
 
 from modules.args import parser
 from modules.dataset.datasets import Item
 from modules.model import load_model
+from modules.sample_callback import SampleCallback
 
 logger = logging.getLogger()
 
@@ -155,9 +155,26 @@ def verify_config(config):
         logger.info("Running: [?]")
 
 
+def get_loggers(config):
+    project_dir = Path(config.output_dir, config.project)
+
+    train_loggers = list[pl.loggers.Logger]()
+    if config.loggers.get("tensorboard") is not None:
+        from pytorch_lightning.loggers.tensorboard import TensorBoardLogger
+        train_loggers.append(TensorBoardLogger(save_dir=str(project_dir)))
+
+    if config.loggers.get("wandb") is not None:
+        from pytorch_lightning.loggers.wandb import WandbLogger
+        train_loggers.append(WandbLogger(project=config.project, save_dir=str(project_dir)))
+
+    return train_loggers
+
+
 def main(args, config):
     verify_config(config)
+
     ckpt_save_dir = Path(config.output_dir, config.project, args.run_id)
+    ckpt_save_dir.mkdir(parents=True, exist_ok=True)
 
     if config.seed:
         pl.seed_everything(config.seed)
@@ -179,13 +196,14 @@ def main(args, config):
         num_workers=8
     )
 
-    train_logger = WandbLogger(project=config.project)
+    loggers = get_loggers(config)
 
     trainer: pl.Trainer = pl.Trainer.from_argparse_args(
         args,
-        logger=train_logger,
+        logger=loggers,
         callbacks=[
             ModelCheckpoint(dirpath=ckpt_save_dir, **config.checkpoint),
+            SampleCallback(ckpt_save_dir / "samples")
         ],
         benchmark=not config.aspect_ratio_bucket.enabled,
         **config.trainer

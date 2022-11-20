@@ -8,7 +8,7 @@ import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
 import torch.utils.data
-from diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel
+from diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel, StableDiffusionPipeline
 from transformers import CLIPTokenizer
 
 from modules.clip import CLIPWithSkip
@@ -103,6 +103,9 @@ class StableDiffusionModel(pl.LightningModule):
 
         self.unet.set_use_memory_efficient_attention_xformers(True)
 
+        self.pipeline = StableDiffusionPipeline(vae, text_encoder, tokenizer, unet, noise_scheduler)
+        self.pipeline.set_progress_bar_config(disable=True)
+
         self.save_hyperparameters(config)
 
     @torch.no_grad()
@@ -118,43 +121,6 @@ class StableDiffusionModel(pl.LightningModule):
     def _encode_token_ids(self, token_ids):
         with self._text_encode_context:
             return self.text_encoder.forward(token_ids).last_hidden_state
-
-    # @rank_zero_only
-    # def log_samples(self):
-    #     pipeline = pipeline.to(accelerator.device)
-    #     pipeline.set_progress_bar_config(disable=True)
-    #     pipeline.enable_xformers_memory_efficient_attention()
-    #     sample_dir = run_output_dir / "samples"
-    #     sample_dir.mkdir(exist_ok=True)
-    #     samples = []
-    #     with torch.autocast("cuda"), torch.inference_mode():
-    #         for concept in tqdm(config.sampling.concepts, unit="concept"):
-    #             g_cuda = torch.Generator(device=accelerator.device).manual_seed(concept.seed)
-    #             concept_samples = []
-    #             with tqdm(total=concept.num_samples + (concept.num_samples % config.sampling.batch_size),
-    #                       desc=f"Generating samples") as progress:
-    #
-    #                 for _ in range(math.ceil(concept.num_samples / config.sampling.batch_size)):
-    #                     concept_samples.extend(pipeline(
-    #                         prompt=concept.prompt,
-    #                         negative_prompt=concept.negative_prompt,
-    #                         guidance_scale=concept.cfg_scale,
-    #                         num_inference_steps=concept.steps,
-    #                         num_images_per_prompt=config.sampling.batch_size,
-    #                         generator=g_cuda).images)
-    #                     progress.update(config.sampling.batch_size)
-    #             samples.append((concept.prompt, concept_samples))
-    #     del pipeline
-    #     if torch.cuda.is_available():
-    #         torch.cuda.empty_cache()
-    #
-    #     for i, (_, images) in enumerate(samples):
-    #         for j, image in enumerate(images):
-    #             image.save(sample_dir / f"{global_steps}_{i}_{j}.png")
-    #
-    #     if wandb_enabled and config.monitoring.wandb.sample and any(samples):
-    #         log_samples = {"samples": {prompt: [wandb.Image(x) for x in images] for prompt, images in samples}}
-    #         accelerator.log(log_samples, global_steps, {"commit": False})
 
     def training_step(self, batch, batch_idx):
         # if batch.latents is not None:

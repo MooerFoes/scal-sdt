@@ -40,6 +40,8 @@ sampling:
       cfg_scale: 11
       num_samples: 8
       seed: 114514
+      width: 512
+      height: 512
 
 checkpoint:
   filename: '{epoch}-{train_loss:.2f}'
