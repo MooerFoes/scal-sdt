@@ -5,16 +5,14 @@ from pathlib import Path
 import click
 import torch
 from PIL.Image import Image
-from diffusers import AutoencoderKL, UNet2DConditionModel
 from diffusers.pipelines import StableDiffusionPipeline
 from omegaconf import OmegaConf
 from tqdm import tqdm
-from transformers import CLIPTokenizer
 
-from modules.clip import CLIPWithSkip
 from modules.dataset.arb_datasets import SDDatasetWithARB
 from modules.dataset.bucket import BucketManager
 from modules.dataset.datasets import SDDataset
+from modules.model import load_df_pipeline
 
 logger = logging.getLogger("cls-gen")
 
@@ -31,15 +29,15 @@ def generate_class_images(pipeline: StableDiffusionPipeline, concept, size_dist:
     cur_dist = {size: len([k for k in class_id_size_map.keys() if class_id_size_map[k] == size]) for id, size in
                 class_id_size_map.items()}
 
-    logging.info(f"Current distribution:\n{cur_dist}")
+    logger.info(f"Current distribution:\n{cur_dist}")
 
     target_dist = {size: round(autogen_config.num_target * p) for size, p in size_dist.items()}
 
-    logging.info(f"Target distribution:\n{target_dist}")
+    logger.info(f"Target distribution:\n{target_dist}")
 
     dist_diff = {k: v - cur_dist.get(k, 0) for k, v in target_dist.items() if v > cur_dist.get(k, 0)}
 
-    logging.info(f"Distribution diff:\n{dist_diff}")
+    logger.info(f"Distribution diff:\n{dist_diff}")
 
     num_new_images = sum(dist_diff.values())
     logger.info(f"Total number of class images to sample: {num_new_images}.")
@@ -86,42 +84,19 @@ def main(config):
         logger.warning("Prior preservation not enabled. Class image generation is not needed.")
         return
 
-    unet = UNet2DConditionModel.from_pretrained(config.model, subfolder="unet")
+    unet, vae, text_encoder, tokenizer = load_df_pipeline(Path(config.model), config.vae, config.tokenizer)
+
     unet.half()
     unet.set_use_memory_efficient_attention_xformers(True)
 
-    # scheduler = PNDMScheduler(
-    #     beta_start=0.00085,
-    #     beta_end=0.0120,
-    #     beta_schedule="scaled_linear",
-    #     num_train_timesteps=1000,
-    #     skip_prk_steps=True
-    # )
-
-    # from diffusers.schedulers.scheduling_ddim import DDIMScheduler
-    # scheduler = DDIMScheduler.from_config(config.model)
-
-    # from diffusers.schedulers.scheduling_lms_discrete import LMSDiscreteScheduler
-    # scheduler = LMSDiscreteScheduler(
-    #     beta_start=0.00085,
-    #     beta_end=0.0120,
-    #     beta_schedule="scaled_linear"
-    # )
-
-    from diffusers.schedulers.scheduling_euler_ancestral_discrete import EulerAncestralDiscreteScheduler
-    scheduler = EulerAncestralDiscreteScheduler(
-        num_train_timesteps=1000,
-        beta_start=0.00085,
-        beta_end=0.0120,
-        beta_schedule="scaled_linear"
-    )
+    from diffusers.schedulers.scheduling_ddim import DDIMScheduler
+    scheduler = DDIMScheduler.from_config(config.model, subfolder="scheduler")
 
     pipeline = StableDiffusionPipeline(
         unet=unet,
-        vae=AutoencoderKL.from_pretrained(config.vae if config.vae else config.model, subfolder="vae"),
-        text_encoder=CLIPWithSkip.from_pretrained(config.model, subfolder="text_encoder"),
-        tokenizer=CLIPTokenizer.from_pretrained(config.tokenizer if config.tokenizer else config.model,
-                                                subfolder="tokenizer"),
+        vae=vae,
+        text_encoder=text_encoder,
+        tokenizer=tokenizer,
         scheduler=scheduler
     )
     pipeline.set_progress_bar_config(disable=True)
