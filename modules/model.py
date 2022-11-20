@@ -64,7 +64,7 @@ def get_lr_scheduler(config, optimizer) -> Any:
     return scheduler
 
 
-def load_df_pipeline(path, vae=None, tokenizer=None):
+def load_df_pipeline(path, vae=None, tokenizer=None, clip_stop_at_layer=1):
     unet = UNet2DConditionModel.from_pretrained(path, subfolder="unet")
 
     if vae is None:
@@ -73,6 +73,7 @@ def load_df_pipeline(path, vae=None, tokenizer=None):
         vae = AutoencoderKL.from_pretrained(vae)
 
     text_encoder = CLIPWithSkip.from_pretrained(path, subfolder="text_encoder")
+    text_encoder.stop_at_layer = clip_stop_at_layer
 
     if tokenizer is None:
         tokenizer = CLIPTokenizer.from_pretrained(path, subfolder="tokenizer")
@@ -86,7 +87,8 @@ def load_model(config):
     model_path = Path(config.model)
 
     if (model_path / "model_index.json").is_file():
-        unet, vae, text_encoder, tokenizer = load_df_pipeline(model_path, config.vae, config.tokenizer)
+        unet, vae, text_encoder, tokenizer = \
+            load_df_pipeline(model_path, config.vae, config.tokenizer, config.clip_stop_at_layer)
     elif model_path.suffix.lower() == ".ckpt":
         raise NotImplementedError("Loading directly from SD checkpoint is not implemented.")
     else:
@@ -94,7 +96,7 @@ def load_model(config):
 
     logger.info("Model loaded")
 
-    text_encoder.stop_at_layer = config.clip_stop_at_layer
+
     noise_scheduler = DDIMScheduler.from_config(config.model, subfolder="scheduler")
 
     return StableDiffusionModel(config, unet, vae, text_encoder, tokenizer, noise_scheduler)
