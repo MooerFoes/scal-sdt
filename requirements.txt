@@ -6,4 +6,6 @@ numpy~=1.21
 Pillow~=9.3
 tqdm~=4.64
 click~=8.1
+ftfy~=6.1
+accelerate~=0.14
 git+https://github.com/CCRcmcpe/diffusers.git
