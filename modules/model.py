@@ -66,9 +66,19 @@ def get_lr_scheduler(config, optimizer) -> Any:
 
 def load_df_pipeline(path, vae=None, tokenizer=None):
     unet = UNet2DConditionModel.from_pretrained(path, subfolder="unet")
-    vae = AutoencoderKL.from_pretrained(vae, subfolder="vae" if not vae else None)
+
+    if vae is None:
+        vae = AutoencoderKL.from_pretrained(path, subfolder="vae")
+    else:
+        vae = AutoencoderKL.from_pretrained(vae)
+
     text_encoder = CLIPWithSkip.from_pretrained(path, subfolder="text_encoder")
-    tokenizer = CLIPTokenizer.from_pretrained(tokenizer, subfolder="tokenizer" if not tokenizer else None)
+
+    if tokenizer is None:
+        tokenizer = CLIPTokenizer.from_pretrained(path, subfolder="tokenizer")
+    else:
+        tokenizer = CLIPTokenizer.from_pretrained(tokenizer)
+
     return unet, vae, text_encoder, tokenizer
 
 
