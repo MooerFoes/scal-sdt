@@ -6,9 +6,9 @@ from diffusers import UNet2DConditionModel, AutoencoderKL, StableDiffusionPipeli
 from omegaconf import OmegaConf
 from transformers import CLIPTokenizer, CLIPTextModel
 
-from converters.modules.common import get_module_state_dict, DTYPE_CHOICES
-from converters.modules.sd_to_diffusers import create_unet_diffusers_config, create_vae_diffusers_config, \
-    convert_ldm_clip_checkpoint, create_diffusers_scheduler
+from modules.convert.common import get_module_state_dict, DTYPE_CHOICES
+from modules.convert.sd_to_diffusers import create_unet_diffusers_config, create_vae_diffusers_config, \
+    create_diffusers_scheduler
 
 V1_INFERENCE = 'https://raw.githubusercontent.com/CompVis/stable-diffusion/main/configs/stable-diffusion/v1-inference.yaml'
 
@@ -21,8 +21,8 @@ def get_default_config():
 
 
 @click.command()
-@click.argument("checkpoint", type=click.File("r"), help="Path to the checkpoint.")
-@click.argument("sd-output", type=click.Path(), help="Path to the output Diffusers saved pipeline.")
+@click.argument("checkpoint", type=click.File("rb"))
+@click.argument("output", type=click.Path())
 @click.option("--config", type=click.File("r"), help="Path to the LDM config. (Default: v1-inference.yaml)")
 @click.option("--unet-dtype",
               type=DTYPE_CHOICES,
@@ -36,7 +36,11 @@ def get_default_config():
               type=DTYPE_CHOICES,
               default="fp32",
               help="Save text encoder weights in data type.")
-def main(checkpoint, sd_output, config, unet_dtype, vae_dtype, text_encoder_dtype):
+def main(checkpoint, output, config, unet_dtype, vae_dtype, text_encoder_dtype):
+    """Converts SCAL-SDT checkpoint to Diffusers format.
+
+    CHECKPOINT: Path to the SCAL-SDT checkpoint.
+    OUTPUT: Diffusers pipeline output path."""
     if config is None:
         config = get_default_config()
     else:
@@ -57,20 +61,23 @@ def main(checkpoint, sd_output, config, unet_dtype, vae_dtype, text_encoder_dtyp
     vae = AutoencoderKL(**vae_config)
     vae.load_state_dict(vae_dict)
 
-    text_encoder = CLIPTextModel()
+    text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14")
     text_encoder.load_state_dict(text_encoder_dict)
 
     scheduler = create_diffusers_scheduler(config)
 
-    text_model = convert_ldm_clip_checkpoint(checkpoint)
     tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
 
     pipeline = StableDiffusionPipeline(
         vae=vae,
-        text_encoder=text_model,
+        text_encoder=text_encoder,
         tokenizer=tokenizer,
         unet=unet,
         scheduler=scheduler
     )
 
-    pipeline.save_pretrained(sd_output)
+    pipeline.save_pretrained(output)
+
+
+if __name__ == '__main__':
+    main()
