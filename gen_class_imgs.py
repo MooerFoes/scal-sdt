@@ -44,7 +44,8 @@ def generate_class_images(pipeline: StableDiffusionPipeline, concept, size_dist:
     num_new_images = sum(dist_diff.values())
     logger.info(f"Total number of class images to sample: {num_new_images}.")
 
-    with torch.autocast("cuda"), torch.inference_mode(), \
+    # torch.autocast("cuda") causes VAE encode fucked.
+    with torch.inference_mode(), \
             tqdm(total=num_new_images, desc="Generating class images") as progress:
         for (w, h), target in dist_diff.items():
             progress.set_postfix({"size": (w, h)})
