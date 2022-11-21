@@ -43,22 +43,13 @@ loggers: { }
 
 optimizer:
   name: bitsandbytes.optim.AdamW8bit
-  params:
-    lr: 5e-6
-    beta1: 0.9
-    beta2: 0.999
-    weight_decay: 1e-2
-    eps: 1e-8
+  params: ???
   lr_scale:
     enabled: true
     method: 'sqrt'
   lr_scheduler:
     name: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
-    params:
-      T_0: 10
-      T_mult: 1
-      eta_min: 7e-8
-      last_epoch: -1
+    params: ???
     warmup:
       enabled: true
       init_lr: 7e-8

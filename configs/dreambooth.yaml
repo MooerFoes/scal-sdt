@@ -48,8 +48,9 @@ checkpoint:
   auto_insert_metric_name: true
   # every_n_train_steps: 1145
   every_n_epochs: 10
-  save_top_k: 5
   monitor: 'epoch'
+  save_top_k: 5
+  mode: 'max'
 
 trainer:
   accelerator: gpu
