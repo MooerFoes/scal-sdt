@@ -1,6 +1,5 @@
 import random
 from collections.abc import Iterable
-from logging import getLogger
 from pathlib import Path
 
 import torch
@@ -11,8 +10,6 @@ from tqdm.auto import tqdm
 
 from .bucket import BucketManager
 from .datasets import SDDataset, DBDataset, Item
-
-logger = getLogger("ARB")
 
 
 class SDDatasetWithARB(torch.utils.data.IterableDataset, SDDataset):
@@ -30,8 +27,8 @@ class SDDatasetWithARB(torch.utils.data.IterableDataset, SDDataset):
 
         self.bucket_manager = bucket_manager
 
-    def __len__(self):
-        return self._length // self.batch_size
+    # def __len__(self):
+    #     return self._length // self.batch_size
 
     @staticmethod
     def get_id_size_map(paths: Iterable[Path]):
@@ -76,12 +73,20 @@ class SDDatasetWithARB(torch.utils.data.IterableDataset, SDDataset):
         new_img = image_transforms(img)
 
         if self.debug:
-            print(x, y, w, h, "->", new_img.shape)
+            print(f"{(x, y)} {(w, h)} -> {new_img.shape}")
             import uuid, torchvision
-            filename = str(uuid.uuid4())
-            torchvision.utils.save_image(torchvision.transforms.ToTensor()(img), f"/tmp/{filename}_orig.png")
-            torchvision.utils.save_image(self.denormalize(new_img), f"/tmp/{filename}_gen.png")
-            print(f"Saved sample: /tmp/{filename}")
+
+            save_dir = Path("/tmp", "arb_debug")
+            save_dir.mkdir(exist_ok=True)
+
+            f_id = str(uuid.uuid4())
+
+            log_new_img: Image.Image = torchvision.transforms.ToPILImage()(self.denormalize(new_img))
+
+            img.save(save_dir / f"{f_id}_orig.png")
+            log_new_img.save(save_dir / f"{f_id}_tr.png")
+
+            print(f"Saved sample: {save_dir / f_id}")
 
         return new_img
 
@@ -94,7 +99,7 @@ class SDDatasetWithARB(torch.utils.data.IterableDataset, SDDataset):
                 yield entry
 
 
-class DBDatasetWithARB(DBDataset, SDDatasetWithARB):
+class DBDatasetWithARB(SDDatasetWithARB, DBDataset):
     def __init__(self, batch_size=1, seed=69, debug=False, **kwargs):
         super().__init__(batch_size, seed, debug, **kwargs)
 
@@ -103,7 +108,7 @@ class DBDatasetWithARB(DBDataset, SDDatasetWithARB):
         class_id_size_map = self.get_id_size_map((entry.path for entry in self.class_entries))
         class_id_entry_map: dict[str, Item] = {str(entry.path): entry for entry in self.class_entries}
 
-        class_bucket_manager = BucketManager(batch_size=1, seed=seed, debug=debug)
+        class_bucket_manager = BucketManager(batch_size=1, seed=seed, debug=False)
         class_bucket_manager.buckets = self.bucket_manager.buckets
         class_bucket_manager.base_res = self.bucket_manager.base_res
 
@@ -122,7 +127,7 @@ class DBDatasetWithARB(DBDataset, SDDatasetWithARB):
         return entries
 
     def __iter__(self):
-        for batch, instance_size in super().bucket_manager.generator():
+        for batch, instance_size in self.bucket_manager.generator():
             for instance_id in batch:
                 instance_entry = self.id_entry_map[instance_id]
                 instance_image = self.read_img(instance_entry.path)

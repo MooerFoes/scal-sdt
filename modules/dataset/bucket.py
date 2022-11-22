@@ -9,6 +9,12 @@ class Bucket:
     size: tuple[int, int]
     ids: list[str] = field(default_factory=list[str])
 
+    def __hash__(self) -> int:
+        return self.size.__hash__()
+
+    def __str__(self) -> str:
+        return str(self.size)
+
     @property
     def aspect(self):
         return float(self.size[0]) / float(self.size[1])
@@ -20,17 +26,16 @@ class BucketManager:
     base_res: tuple[int, int]
     epoch: dict[Bucket, list[str]] | None = None
     left_over: list[str] | None = None
-    batch_total: int | None = None
-    batch_delivered: int | None = None
+    batch_total = 0
+    batch_delivered = 0
 
-    def __init__(self, batch_size, seed, world_size=None, global_rank=None, debug=False):
+    def __init__(self, batch_size, seed, world_size=1, global_rank=0, debug=False):
         self.batch_size = batch_size
         self.world_size = world_size
         self.global_rank = global_rank
         self.prng = self.get_prng(seed)
         epoch_seed = self.prng.tomaxint() % (2 ** 32 - 1)
         self.epoch_prng = self.get_prng(epoch_seed)  # separate prng for sharding use for increased thread resilience
-        self.batch_delivered = None
         self.debug = debug
 
     @staticmethod
@@ -71,7 +76,7 @@ class BucketManager:
 
         if self.debug:
             timer = time.perf_counter() - timer
-            print(f"Buckets:\n{resolutions}")
+            print(f"Bucket sizes:\n{resolutions}")
             print(f"Time: {timer:.5f}s")
 
     def put_in(self, id_size_map: dict[str, tuple[int, int]], max_aspect_error=0.5):
@@ -201,14 +206,11 @@ Skipped Images: {skipped_ids}
 
         if self.debug:
             timer = time.perf_counter() - timer
-            print(f"bucket probs: " + ", ".join(map(lambda x: f"{x:.2f}", list(bucket_probs * 100))))
+            print(f"Bucket probs: " + ", ".join(map(lambda x: f"{x:.2f}", list(bucket_probs * 100))))
             print(
-                f"""
-                chosen id: {chosen_bucket}
-                batch data: {batch_buckets}
-                resolution: {resolution}
-                get_batch: {timer:.5f}s
-                """
+                f"""Chosen bucket: {chosen_bucket}
+Batch data: {batch_buckets}
+get_batch: {timer:.5f}s"""
             )
 
         self.batch_delivered += 1

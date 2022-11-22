@@ -96,7 +96,6 @@ def load_model(config):
 
     logger.info("Model loaded")
 
-
     noise_scheduler = DDIMScheduler.from_config(config.model, subfolder="scheduler")
 
     return StableDiffusionModel(config, unet, vae, text_encoder, tokenizer, noise_scheduler)
