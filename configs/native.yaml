@@ -1,0 +1,93 @@
+model: 'path/to/model' # Or HuggingFace model identifier
+
+# vae: 'path/to/vae'
+# tokenizer: 'path/to/tokenizer'
+
+# Checkpoints will be saved in <output dir>/<project>/<run id>. For run id, see args.
+output_dir: 'output'
+project: 'SCAL-SDT'
+
+data:
+  resolution: 512
+  center_crop: false
+  concepts:
+    # You can add more concepts
+    - instance_set:
+        path: 'example/data'
+        combine_prompt_from_txt: true
+        prompt_combine_template: '{TXT_PROMPT}'
+
+sampling:
+  interval_steps: 50
+  batch_size: 1
+  concepts:
+    - prompt: 'sks 1girl, sitting'
+      negative_prompt: 'lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry'
+      steps: 28
+      cfg_scale: 11
+      num_samples: 8
+      seed: 114514
+      width: 512
+      height: 512
+
+checkpoint:
+  filename: '{epoch}-{train_loss:.2f}'
+  auto_insert_metric_name: true
+  # every_n_train_steps: 1145
+  every_n_epochs: 10
+  monitor: 'epoch'
+  save_top_k: 5
+  mode: 'max'
+
+trainer:
+  accelerator: gpu
+  devices: -1
+  auto_select_gpus: true
+  precision: 16
+  move_metrics_to_cpu: true
+  log_every_n_steps: 1
+
+batch_size: 4
+seed: 114514
+
+prior_preservation:
+  enabled: false
+
+train_text_encoder: false
+
+aspect_ratio_bucket:
+  enabled: true
+  debug: false
+
+clip_stop_at_layer: 2
+pad_tokens: true
+
+loggers:
+  wandb:
+    sample: true
+    artifact: false
+    remove_ckpt_after_upload: false
+
+optimizer:
+  name: bitsandbytes.optim.AdamW8bit
+  params:
+    lr: 5e-6
+    beta1: 0.9
+    beta2: 0.999
+    weight_decay: 1e-2
+    eps: 1e-8
+  lr_scale:
+    enabled: true
+    method: 'sqrt'
+  lr_scheduler:
+    name: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
+    params:
+      T_0: 10
+      T_mult: 1
+      eta_min: 7e-8
+      last_epoch: -1
+    warmup:
+      enabled: true
+      init_lr: 7e-8
+      steps: 100
+      strategy: 'linear'
