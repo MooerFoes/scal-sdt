@@ -25,7 +25,8 @@ from modules.convert.diffusers_to_sd import convert_unet_state_dict, convert_vae
               default="fp32",
               help="Save text encoder weights in data type.")
 @click.option("--overwrite", is_flag=True)
-def main(checkpoint, output, text_encoder, vae, unet_dtype, vae_dtype, text_encoder_dtype, overwrite):
+@click.option("--map-location", type=str, default="cpu", help='Where the checkpoint is loaded to. Could be "cpu" or "cuda".')
+def main(checkpoint, output, text_encoder, vae, unet_dtype, vae_dtype, text_encoder_dtype, overwrite, map_location):
     """Converts SCAL-SDT checkpoint to Stable Diffusion format.
 
     CHECKPOINT: Path to the SCAL-SDT checkpoint.
@@ -33,7 +34,7 @@ def main(checkpoint, output, text_encoder, vae, unet_dtype, vae_dtype, text_enco
     if Path(output).exists() and not overwrite:
         raise FileExistsError(f"{output} already exists")
 
-    state_dict: STATE_DICT = torch.load(checkpoint)["state_dict"]
+    state_dict: STATE_DICT = torch.load(checkpoint, map_location=map_location)["state_dict"]
 
     # Convert the UNet model
     unet_dict = get_module_state_dict(state_dict, "unet", unet_dtype)
@@ -51,7 +52,7 @@ def main(checkpoint, output, text_encoder, vae, unet_dtype, vae_dtype, text_enco
     if text_encoder:
         # Convert the text encoder model
         text_encoder_dict = get_module_state_dict(state_dict, "text_encoder", text_encoder_dtype)
-        text_encoder_dict = {"cond_stage_model.transformer." + k for k, v in text_encoder_dict.items()}
+        text_encoder_dict = {"cond_stage_model.transformer." + k: v for k, v in text_encoder_dict.items()}
 
     # Put together new checkpoint
     state_dict = {**unet_dict, **vae_dict, **text_encoder_dict}
