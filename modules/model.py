@@ -139,11 +139,15 @@ class StableDiffusionModel(pl.LightningModule):
     @torch.no_grad()
     def _vae_encode(self, image):
         device = self.unet.device
-        self.unet.cpu()
+
+        if self.config.med_vram:
+            self.unet.to("cpu")
 
         latents = self.vae.encode(image).latent_dist.sample() * 0.18215
 
-        self.unet.to(device)
+        if self.config.med_vram:
+            self.unet.to(device)
+
         return latents
 
     def _encode_token_ids(self, token_ids):
