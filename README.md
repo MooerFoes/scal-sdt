@@ -16,8 +16,9 @@ Stable Diffusion trainer with scalable dataset size and hardware usage.
 
 ### Install Requirements
 
-Linux is recommended. (If you care to install `bitsandbytes` on Windows)  
+Linux is recommended. (If you care to install `bitsandbytes` on Windows)
 
+Python 3.10. Will not work on 3.7.  
 Torch 1.13 and CUDA 11.6. Match exact version is recommended but not required.
 
 [xformers](https://github.com/facebookresearch/xformers) is required for efficient VRAM usage. Easiest way to install it is `conda install xformers`.
