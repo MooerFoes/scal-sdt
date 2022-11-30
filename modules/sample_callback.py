@@ -5,33 +5,11 @@ from typing import Any
 import pytorch_lightning as pl
 import torch
 from PIL.Image import Image
-from diffusers import UNet2DConditionModel
 from pytorch_lightning.utilities import rank_zero_only
 from tqdm import tqdm
-from transformers import CLIPTextModel
 
 from .model import StableDiffusionModel
 from .utils import rename_keys
-
-
-class DisableGradCheckpointing:
-    def __init__(self, *modules):
-        self.modules = modules
-        self.to_enable = [module for module in modules if module.is_gradient_checkpointing]
-
-    def __enter__(self):
-        for module in self.modules:
-            if isinstance(module, UNet2DConditionModel):
-                module.disable_gradient_checkpointing()
-            elif isinstance(module, CLIPTextModel):
-                module.gradient_checkpointing_disable()
-
-    def __exit__(self, *args):
-        for module in self.to_enable:
-            if isinstance(module, UNet2DConditionModel):
-                module.enable_gradient_checkpointing()
-            elif isinstance(module, CLIPTextModel):
-                module.gradient_checkpointing_enable()
 
 
 class SampleCallback(pl.Callback):
@@ -59,31 +37,35 @@ class SampleCallback(pl.Callback):
 
         samples = dict[str, list[Image]]()
 
-        with DisableGradCheckpointing(model.unet, model.text_encoder):
-            for concept in tqdm(sampling_config.concepts, unit="concept"):
-                generator = torch.Generator(device=model.pipeline.device).manual_seed(concept.seed)
+        text_encoder_training = model.text_encoder.training
+        model.text_encoder.eval()
 
-                concept_samples = list[Image]()
-                i = concept.num_samples
-                with tqdm(total=concept.num_samples + (concept.num_samples % batch_size),
-                          desc="Generating samples") as progress:
-                    while True:
-                        actual_bsz = i if i - batch_size < 0 else batch_size
+        for concept in tqdm(sampling_config.concepts, unit="concept"):
+            generator = torch.Generator(device=model.pipeline.device).manual_seed(concept.seed)
 
-                        if actual_bsz <= 0:
-                            break
+            concept_samples = list[Image]()
+            i = concept.num_samples
+            with tqdm(total=concept.num_samples + (concept.num_samples % batch_size),
+                      desc="Generating samples") as progress:
+                while True:
+                    actual_bsz = i if i - batch_size < 0 else batch_size
 
-                        concept_samples.extend(
-                            model.pipeline(
-                                num_images_per_prompt=actual_bsz,
-                                generator=generator,
-                                **rename_keys(concept, self._CONFIG_TRANSFORM)
-                            ).images
-                        )
-                        progress.update(actual_bsz)
+                    if actual_bsz <= 0:
+                        break
 
-                        i -= actual_bsz
-                samples[concept.prompt] = concept_samples
+                    concept_samples.extend(
+                        model.pipeline(
+                            num_images_per_prompt=actual_bsz,
+                            generator=generator,
+                            **rename_keys(concept, self._CONFIG_TRANSFORM)
+                        ).images
+                    )
+                    progress.update(actual_bsz)
+
+                    i -= actual_bsz
+            samples[concept.prompt] = concept_samples
+
+        model.text_encoder.train(text_encoder_training)
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
