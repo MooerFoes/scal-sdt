@@ -87,16 +87,15 @@ def main(checkpoint, output,
 
     if format == "pt":
         with open(output, 'wb') as f:
-            root = {"state_dict": state_dict}
-            torch.save(root, f)
+            torch.save(state_dict, f)
     elif format == "safetensors":
         try:
             from safetensors.torch import save_file
         except ImportError:
             raise 'In order to use safetensors, run "pip install safetensors"'
 
-        root = {"state_dict": {k: v.contiguous().to_dense() for k, v in state_dict.items()}}
-        save_file(root, output)
+        state_dict = {k: v.contiguous().to_dense() for k, v in state_dict.items()}
+        save_file(state_dict, output)
     else:
         raise 'Invalid format'
 
