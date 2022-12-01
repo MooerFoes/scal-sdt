@@ -1,3 +1,14 @@
+import sys
+from pathlib import Path
+
+import click
+
+parent = str(Path(__file__).parent.parent.absolute())
+sys.path.append(parent)
+
+from modules.dataset.bucket import BucketManager
+
+
 def gen_buckets(base_res=(512, 512), max_size=512 * 768, dim_range=(256, 1024), divisor=64):
     min_dim, max_dim = dim_range
     buckets = set()
@@ -23,14 +34,10 @@ def gen_buckets(base_res=(512, 512), max_size=512 * 768, dim_range=(256, 1024), 
         buckets.add((w, h))
         h += divisor
 
-    resolutions = sorted(buckets, key=lambda sz: sz[0] * 4096 - sz[1])
-
-    print(f"Buckets:\n{resolutions}")
+    return sorted(buckets, key=lambda sz: sz[0] * 4096 - sz[1])
 
 
 def arb_transform(source_size: tuple[int, int], size: tuple[int, int]):
-    print(f"Class: {source_size}, Bucket: {size}")
-
     x, y = source_size
     short, long = (x, y) if x <= y else (y, x)
 
@@ -45,8 +52,26 @@ def arb_transform(source_size: tuple[int, int], size: tuple[int, int]):
     else:
         new_w, new_h = w, h
 
-    print(f"ARB will fuck your class image to: {(new_w, new_h)} before random crop")
+    return new_w, new_h
 
 
-gen_buckets(base_res=(512, 512), max_size=512 * 768, dim_range=(256, 1024), divisor=64)
-arb_transform((512, 512), (512, 768))
+@click.command()
+@click.argument("width", type=int)
+@click.argument("height", type=int)
+def main(width, height):
+    aspect = width / height
+    manager = BucketManager(1, 114514)
+    manager.gen_buckets(base_res=(512, 512), max_size=512 * 768, dim_range=(256, 1024), divisor=64)
+
+    best_fit = min(manager.buckets, key=lambda b: abs(b.aspect - aspect))
+    error = abs(best_fit.aspect - aspect)
+    before_crop = arb_transform((width, height), best_fit.size)
+
+    resolutions = [bucket.size for bucket in manager.buckets]
+
+    print(f"Buckets:\n{resolutions}")
+    print(f"Best fit bucket={best_fit.size}, error={error}")
+    print(f"Resize {(width, height)} -> {before_crop} before crop")
+
+if __name__ == '__main__':
+    main()
