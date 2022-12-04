@@ -32,19 +32,9 @@ pip install -r requirements.txt
 
 ### Config
 
-Setup a config file first.
+Setup a config file first. Documentation: `configs/config.md`.
 
 `configs/native.yaml` (for native training) and `configs/dreambooth.yaml` (for DreamBooth) provided as examples.
-
-Some notable config entries:
-
-`model`: Only Diffusers format is currently supported. Can be path to saved diffusers SD pipeline or a HuggingFace model
-identifier.
-
-`checkpoint.every_n_epochs`: This determines how frequent checkpoints should be saved. `checkpoint.save_top_k` also
-determines how many latest checkpoints should be kept. If your storage is limited, consider changing those.
-
-`loggers.wandb`: If you don't want to use WandB, you should remove this entry.
 
 ### Then?
 
