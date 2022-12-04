@@ -4,7 +4,7 @@ from pathlib import Path
 
 import click
 import torch
-from PIL.Image import Image
+from PIL import Image
 from diffusers import UNet2DConditionModel, AutoencoderKL
 from diffusers.pipelines import StableDiffusionPipeline
 from omegaconf import OmegaConf
@@ -117,7 +117,7 @@ def main(config):
     output = Path("labout")
     output.mkdir(exist_ok=True)
 
-    imgs = list[Image]()
+    imgs = list[Image.Image]()
 
     def callback(i, t, latents):
         latents = 1 / 0.18215 * latents

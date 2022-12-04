@@ -2,9 +2,8 @@ import random
 from collections.abc import Iterable
 from pathlib import Path
 
-import torch
 import torch.utils
-from PIL.Image import Image
+from PIL import Image
 from omegaconf import DictConfig
 from torchvision import transforms
 from tqdm.auto import tqdm
@@ -70,12 +69,6 @@ class SDDatasetWithARB(torch.utils.data.IterableDataset, SDDataset):
         return path_size_map
 
     @staticmethod
-    def denormalize(img, mean=0.5, std=0.5):
-        res = transforms.Normalize(-1 * mean / std, 1.0 / std)(img.squeeze(0))
-        res = torch.clamp(res, 0, 1)
-        return res
-
-    @staticmethod
     def perserve_ratio_size(size: tuple[int, int], dsize: tuple[int, int]):
         w, h = size
         short, long = (w, h) if w <= h else (h, w)
@@ -116,7 +109,7 @@ class SDDatasetWithARB(torch.utils.data.IterableDataset, SDDataset):
 
             f_id = str(uuid.uuid4())
 
-            log_new_img: Image = torchvision.transforms.ToPILImage()(result)
+            log_new_img: Image.Image = torchvision.transforms.ToPILImage()(result)
 
             img.save(save_dir / f"{f_id}_orig.png")
             log_new_img.save(save_dir / f"{f_id}_tr.png")

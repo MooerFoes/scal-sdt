@@ -4,7 +4,7 @@ from typing import Any
 
 import pytorch_lightning as pl
 import torch
-from PIL.Image import Image
+from PIL import Image
 from pytorch_lightning.utilities import rank_zero_only
 from tqdm import tqdm
 
@@ -35,7 +35,7 @@ class SampleCallback(pl.Callback):
         save_dir = self.sample_dir / str(global_step)
         save_dir.mkdir(parents=True, exist_ok=True)
 
-        samples = dict[str, list[Image]]()
+        samples = dict[str, list[Image.Image]]()
 
         text_encoder_training = model.text_encoder.training
         model.text_encoder.eval()
@@ -43,7 +43,7 @@ class SampleCallback(pl.Callback):
         for concept in tqdm(sampling_config.concepts, unit="concept"):
             generator = torch.Generator(device=model.pipeline.device).manual_seed(concept.seed)
 
-            concept_samples = list[Image]()
+            concept_samples = list[Image.Image]()
             i = concept.num_samples
             with tqdm(total=concept.num_samples + (concept.num_samples % batch_size),
                       desc="Generating samples") as progress:

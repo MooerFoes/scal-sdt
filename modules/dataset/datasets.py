@@ -3,9 +3,8 @@ import random
 from dataclasses import dataclass
 from pathlib import Path
 
-import PIL
 import torch
-from PIL.Image import Image
+from PIL import Image
 from omegaconf import ListConfig
 from torch.utils.data import Dataset
 from torchvision import transforms
@@ -131,8 +130,8 @@ class SDDataset(Dataset):
         return self._get_item(self.entries[index])
 
     @staticmethod
-    def read_img(filepath: Path) -> Image:
-        img = PIL.Image.open(filepath)
+    def read_img(filepath: Path) -> Image.Image:
+        img = Image.open(filepath)
 
         if not img.mode == "RGB":
             img = img.convert("RGB")

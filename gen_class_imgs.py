@@ -4,7 +4,7 @@ from pathlib import Path
 
 import click
 import torch
-from PIL.Image import Image
+from PIL import Image
 from diffusers.pipelines import StableDiffusionPipeline
 from omegaconf import OmegaConf
 from tqdm import tqdm
@@ -55,7 +55,7 @@ def generate_class_images(pipeline: StableDiffusionPipeline, concept, size_dist:
                 if actual_bs <= 0:
                     break
 
-                images: list[Image] = pipeline(
+                images: list[Image.Image] = pipeline(
                     prompt=concept.class_set.prompt,
                     negative_prompt=autogen_config.negative_prompt,
                     guidance_scale=autogen_config.cfg_scale,
