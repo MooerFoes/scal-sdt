@@ -3,8 +3,9 @@ import random
 from dataclasses import dataclass
 from pathlib import Path
 
+import PIL
 import torch
-from PIL import Image
+from PIL.Image import Image
 from omegaconf import ListConfig
 from torch.utils.data import Dataset
 from torchvision import transforms
@@ -60,8 +61,7 @@ class SDDataset(Dataset):
             [
                 transforms.Resize(size, interpolation=transforms.InterpolationMode.LANCZOS),
                 transforms.CenterCrop(size) if center_crop else transforms.RandomCrop(size),
-                transforms.ToTensor(),
-                transforms.Normalize([0.5], [0.5]),
+                transforms.ToTensor()
             ]
         )
 
@@ -113,15 +113,18 @@ class SDDataset(Dataset):
     def __len__(self):
         return len(self.entries)
 
-    def _get_item(self, entry):
-        entry = copy.copy(entry)
+    def read_and_transform(self, path):
         # if not self.cached_latents:
-        image = self.read_img(entry.path)
+        image = self.read_img(path)
         image = self.image_transforms(image)
         if self.augment_transforms is not None:
             image = self.augment_transforms(image)
-        entry.image = image
+        image = transforms.Normalize([0.5], [0.5])(image)
+        return image
 
+    def _get_item(self, entry):
+        entry = copy.copy(entry)
+        entry.image = self.read_and_transform(entry.path)
         return entry
 
     def __getitem__(self, index) -> Item:
@@ -129,7 +132,7 @@ class SDDataset(Dataset):
 
     @staticmethod
     def read_img(filepath: Path) -> Image:
-        img = Image.open(filepath)
+        img = PIL.Image.open(filepath)
 
         if not img.mode == "RGB":
             img = img.convert("RGB")

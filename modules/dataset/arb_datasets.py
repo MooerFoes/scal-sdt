@@ -4,7 +4,7 @@ from pathlib import Path
 
 import torch
 import torch.utils
-from PIL import Image
+from PIL.Image import Image
 from omegaconf import DictConfig
 from torchvision import transforms
 from tqdm.auto import tqdm
@@ -75,32 +75,40 @@ class SDDatasetWithARB(torch.utils.data.IterableDataset, SDDataset):
         res = torch.clamp(res, 0, 1)
         return res
 
-    def transform(self, img: Image, size: tuple[int, int]):
-        x, y = img.size
-        short, long = (x, y) if x <= y else (y, x)
-
+    @staticmethod
+    def perserve_ratio_size(size: tuple[int, int], dsize: tuple[int, int]):
         w, h = size
-        min_crop, max_crop = (w, h) if w <= h else (h, w)
+        short, long = (w, h) if w <= h else (h, w)
+
+        w_d, h_d = dsize
+        min_crop, max_crop = (w_d, h_d) if w_d <= h_d else (h_d, w_d)
         ratio_src, ratio_dst = long / short, max_crop / min_crop
 
         if ratio_src > ratio_dst:
-            new_w, new_h = (min_crop, int(min_crop * ratio_src)) if x < y else (int(min_crop * ratio_src), min_crop)
+            w_t, h_t = (min_crop, int(min_crop * ratio_src)) if w < h else (int(min_crop * ratio_src), min_crop)
         elif ratio_src < ratio_dst:
-            new_w, new_h = (max_crop, int(max_crop / ratio_src)) if x > y else (int(max_crop / ratio_src), max_crop)
+            w_t, h_t = (max_crop, int(max_crop / ratio_src)) if w > h else (int(max_crop / ratio_src), max_crop)
         else:
-            new_w, new_h = w, h
+            w_t, h_t = w_d, h_d
 
-        image_transforms = transforms.Compose([
-            transforms.Resize((new_h, new_w), interpolation=transforms.InterpolationMode.LANCZOS),
-            transforms.CenterCrop((h, w)) if self.center_crop else transforms.RandomCrop((h, w)),
+        return w_t, h_t
+
+    def get_transform(self, size: tuple[int, int], dsize: tuple[int, int]):
+        h_d, w_d = dsize
+        w_t, h_t = self.perserve_ratio_size(size, dsize)
+
+        return transforms.Compose([
+            transforms.Resize((h_t, w_t), interpolation=transforms.InterpolationMode.LANCZOS),
+            transforms.CenterCrop((h_d, w_d)) if self.center_crop else transforms.RandomCrop((h_d, w_d)),
             transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5])
         ])
 
-        new_img = image_transforms(img)
+    def transform(self, img: Image, size: tuple[int, int]):
+        result = self.get_transform(img.size, size)(img)
 
         if self.debug:
-            print(f"{(x, y)} {(w, h)} -> {new_img.shape}")
+            result_wh = (result.shape[-1], result.shape[-2])
+            print(f"{img.size} {size} -> {result_wh}")
             import uuid, torchvision, tempfile
 
             save_dir = Path(tempfile.gettempdir(), "arb_debug")
@@ -108,7 +116,7 @@ class SDDatasetWithARB(torch.utils.data.IterableDataset, SDDataset):
 
             f_id = str(uuid.uuid4())
 
-            log_new_img: Image.Image = torchvision.transforms.ToPILImage()(self.denormalize(new_img))
+            log_new_img: Image = torchvision.transforms.ToPILImage()(result)
 
             img.save(save_dir / f"{f_id}_orig.png")
             log_new_img.save(save_dir / f"{f_id}_tr.png")
@@ -116,9 +124,11 @@ class SDDatasetWithARB(torch.utils.data.IterableDataset, SDDataset):
             print(f"Saved sample: {save_dir / f_id}")
 
         if self.augment_transforms is not None:
-            new_img = self.augment_transforms(new_img)
+            result = self.augment_transforms(result)
 
-        return new_img
+        result = transforms.Normalize([0.5], [0.5])(result)
+
+        return result
 
     def __iter__(self):
         for batch, size in self.bucket_manager.generator():
