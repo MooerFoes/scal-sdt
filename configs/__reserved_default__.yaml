@@ -1,8 +1,18 @@
 model: ???
 vae: null
 tokenizer: null
+
 output_dir: 'output'
 project: 'SCAL-SDT'
+
+batch_size: 1
+seed: None
+train_text_encoder: false
+gradient_checkpointing: false
+med_vram: false
+xformers: true
+clip_stop_at_layer: 1
+pad_tokens: true
 
 data:
   resolution: 512
@@ -22,16 +32,9 @@ trainer:
   move_metrics_to_cpu: true
   log_every_n_steps: 1
 
-batch_size: 1
-seed: None
-
 prior_preservation:
   enabled: false
   prior_loss_weight: 1.0
-
-train_text_encoder: false
-gradient_checkpointing: false
-med_vram: false
 
 aspect_ratio_bucket:
   enabled: false
@@ -46,9 +49,6 @@ aspect_ratio_bucket:
 #    max_size: 393216
 #    dim_range: [256, 1024]
 #    divisor: 64
-
-clip_stop_at_layer: 1
-pad_tokens: true
 
 loggers: { }
 

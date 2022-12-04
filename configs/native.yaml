@@ -7,6 +7,12 @@ model: 'path/to/model' # Or HuggingFace model identifier
 output_dir: 'output'
 project: 'SCAL-SDT'
 
+batch_size: 4
+seed: 114514
+train_text_encoder: false
+clip_stop_at_layer: 2
+pad_tokens: true
+
 data:
   resolution: 512
   center_crop: false
@@ -46,20 +52,12 @@ trainer:
   log_every_n_steps: 1
   max_epochs: 100
 
-batch_size: 4
-seed: 114514
-
 prior_preservation:
   enabled: false
-
-train_text_encoder: false
 
 aspect_ratio_bucket:
   enabled: true
   debug: false
-
-clip_stop_at_layer: 2
-pad_tokens: true
 
 loggers:
   wandb:
