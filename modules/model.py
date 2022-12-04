@@ -14,15 +14,9 @@ from diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel, Stable
 from transformers import CLIPTokenizer
 
 from modules.clip import CLIPWithSkip
+from modules.utils import get_class
 
 logger = logging.getLogger()
-
-
-def get_class(name: str):
-    import importlib
-    module_name, class_name = name.rsplit(".", 1)
-    module = importlib.import_module(module_name, package=None)
-    return getattr(module, class_name)
 
 
 def get_optimizer(paramters_to_optimize, config, trainer: pl.Trainer):

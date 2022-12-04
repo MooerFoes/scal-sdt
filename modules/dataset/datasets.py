@@ -5,9 +5,12 @@ from pathlib import Path
 
 import torch
 from PIL import Image
+from omegaconf import ListConfig
 from torch.utils.data import Dataset
 from torchvision import transforms
 from transformers import CLIPTokenizer
+
+from modules.dataset.augment import AugmentTransforms
 
 
 @dataclass
@@ -25,6 +28,7 @@ class SDDataset(Dataset):
     A dataset to prepare the instance and class images with the prompts for fine-tuning the model.
     It pre-processes the images and the tokenizes prompts.
     """
+    augment_transforms: AugmentTransforms | None = None
 
     # cached_conds = False
     # cached_latents = False
@@ -36,6 +40,7 @@ class SDDataset(Dataset):
             size=512,
             center_crop=False,
             pad_tokens=False,
+            augment_config: ListConfig | None = None,
             **kwargs
     ):
         self.size = size
@@ -59,6 +64,10 @@ class SDDataset(Dataset):
                 transforms.Normalize([0.5], [0.5]),
             ]
         )
+
+        if augment_config is not None:
+            from .augment import AugmentTransforms
+            self.augment_transforms = AugmentTransforms(augment_config)
 
     def tokenize(self, prompt: str) -> list[int]:
         return self.tokenizer(
@@ -109,6 +118,8 @@ class SDDataset(Dataset):
         # if not self.cached_latents:
         image = self.read_img(entry.path)
         image = self.image_transforms(image)
+        if self.augment_transforms is not None:
+            image = self.augment_transforms(image)
         entry.image = image
 
         return entry

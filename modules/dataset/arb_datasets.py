@@ -115,6 +115,9 @@ class SDDatasetWithARB(torch.utils.data.IterableDataset, SDDataset):
 
             print(f"Saved sample: {save_dir / f_id}")
 
+        if self.augment_transforms is not None:
+            new_img = self.augment_transforms(new_img)
+
         return new_img
 
     def __iter__(self):
