@@ -140,19 +140,10 @@ def verify_config(config):
     concepts = config.data.concepts
     assert any(concepts)
 
-    used_read_txt = all(map(
-        lambda c: c.instance_set.combine_prompt_from_txt or
-                  c.class_set.combine_prompt_from_txt, concepts))
-
-    if config.prior_preservation.enabled:
-        if used_read_txt:
-            logger.info("Running: DreamBooth (alternative method)")
-        else:
-            logger.info("Running: DreamBooth (original paper method)")
-    elif used_read_txt:
+    if not config.prior_preservation.enabled:
         logger.info("Running: Standard Finetuning")
     else:
-        logger.info("Running: [?]")
+        logger.info("Running: DreamBooth")
 
 
 def get_loggers(config):

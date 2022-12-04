@@ -60,10 +60,6 @@ class SDDataset(Dataset):
             ]
         )
 
-    @staticmethod
-    def combine_prompt(prompt: str, txt_prompt: str, template: str):
-        return template.replace("{PROMPT}", prompt).replace("{TXT_PROMPT}", txt_prompt)
-
     def tokenize(self, prompt: str) -> list[int]:
         return self.tokenizer(
             prompt,
@@ -79,11 +75,11 @@ class SDDataset(Dataset):
 
     def resolve_dataset(self, dataset):
         for x in self.get_images(Path(dataset.path)):
-            if dataset.combine_prompt_from_txt:
-                content = x.with_suffix('.txt').read_text()
-                prompt = SDDataset.combine_prompt(dataset.prompt, content, dataset.prompt_combine_template)
-            else:
-                prompt = dataset.prompt
+            prompt = dataset.prompt
+
+            if "{TXT_PROMPT}" in prompt:
+                txt_prompt = x.with_suffix('.txt').read_text()
+                prompt = prompt.replace("{TXT_PROMPT}", txt_prompt)
 
             token_ids = self.tokenize(prompt)
 

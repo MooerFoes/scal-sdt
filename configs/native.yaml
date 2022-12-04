@@ -14,8 +14,7 @@ data:
     # You can add more concepts
     - instance_set:
         path: 'example/data'
-        combine_prompt_from_txt: true
-        prompt_combine_template: '{TXT_PROMPT}'
+        prompt: '{TXT_PROMPT}'
 
 sampling:
   interval_steps: 50
@@ -44,8 +43,8 @@ trainer:
   devices: -1
   auto_select_gpus: true
   precision: 16
-  move_metrics_to_cpu: true
   log_every_n_steps: 1
+  max_epochs: 100
 
 batch_size: 4
 seed: 114514
