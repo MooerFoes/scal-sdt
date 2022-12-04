@@ -64,7 +64,8 @@ def main(width, height):
 
     dim = 512
     print('x =', dim)
-    manager.gen_buckets(base_res=(dim, dim), max_size=int(dim * dim * 1.5), dim_range=(dim // 2, dim * 2), divisor=int(dim / 8))
+    manager.gen_buckets(base_res=(dim, dim), max_size=int(dim * dim * 1.5), dim_range=(dim // 2, dim * 2),
+                        divisor=int(dim / 8))
 
     best_fit = min(manager.buckets, key=lambda b: abs(b.aspect - aspect))
     error = abs(best_fit.aspect - aspect)

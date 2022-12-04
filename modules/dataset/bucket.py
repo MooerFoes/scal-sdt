@@ -29,7 +29,7 @@ class BucketManager:
     batch_total = 0
     batch_delivered = 0
 
-    def __init__(self, batch_size, seed, world_size=1, global_rank=0, debug=False):
+    def __init__(self, batch_size: int, seed: int, world_size=1, global_rank=0, debug=False):
         self.batch_size = batch_size
         self.world_size = world_size
         self.global_rank = global_rank
@@ -39,7 +39,7 @@ class BucketManager:
         self.debug = debug
 
     @staticmethod
-    def get_prng(seed):
+    def get_prng(seed: int):
         return np.random.RandomState(seed)
 
     def gen_buckets(self, base_res=(512, 512), max_size=768 * 512, dim_range=(256, 1024), divisor=64):
@@ -111,13 +111,9 @@ Skipped Images: {skipped_ids}
                     f"Bucket {bucket.size}, aspect {bucket.aspect:.5f}, {len(bucket.ids)} entries"
                 )
 
-    def start_epoch(self, world_size=None, global_rank=None):
+    def start_epoch(self):
         if self.debug:
             timer = time.perf_counter()
-        if world_size is not None:
-            self.world_size = world_size
-        if global_rank is not None:
-            self.global_rank = global_rank
 
         self.epoch = {}
         self.left_over = []
