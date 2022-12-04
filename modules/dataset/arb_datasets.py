@@ -101,9 +101,9 @@ class SDDatasetWithARB(torch.utils.data.IterableDataset, SDDataset):
 
         if self.debug:
             print(f"{(x, y)} {(w, h)} -> {new_img.shape}")
-            import uuid, torchvision
+            import uuid, torchvision, tempfile
 
-            save_dir = Path("/tmp", "arb_debug")
+            save_dir = Path(tempfile.gettempdir(), "arb_debug")
             save_dir.mkdir(exist_ok=True)
 
             f_id = str(uuid.uuid4())
