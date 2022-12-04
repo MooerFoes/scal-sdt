@@ -131,7 +131,7 @@ def get_dataset(config, tokenizer: CLIPTokenizer):
         center_crop=config.data.center_crop,
         pad_tokens=config.pad_tokens,
         batch_size=config.batch_size,
-        debug=config.aspect_ratio_bucket.debug,
+        bucket_config=config.aspect_ratio_bucket,
         seed=config.seed
     )
 

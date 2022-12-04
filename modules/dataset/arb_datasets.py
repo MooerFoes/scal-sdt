@@ -5,6 +5,7 @@ from pathlib import Path
 import torch
 import torch.utils
 from PIL import Image
+from omegaconf import DictConfig
 from torchvision import transforms
 from tqdm.auto import tqdm
 
@@ -12,18 +13,44 @@ from .bucket import BucketManager
 from .datasets import SDDataset, DBDataset, Item
 
 
+def scale_bucket_params(dim: int, c_size: float, c_dim: float, c_div: float):
+    return {
+        "base_res": (dim, dim),
+        "max_size": int(dim ** 2 * c_size),
+        "dim_range": (int(dim / c_dim), int(dim * c_dim)),
+        "divisor": int(dim / c_div)
+    }
+
+
+def get_gen_bucket_params(dim: int, bucket_config: DictConfig):
+    bucket_params = bucket_config.get("manual")
+    if bucket_params is None:
+        bucket_params = scale_bucket_params(
+            dim,
+            bucket_config.c_size,
+            bucket_config.c_dim,
+            bucket_config.c_div
+        )
+    else:
+        for k, v in bucket_params:
+            if isinstance(v, tuple):
+                bucket_params[k] = [x for x in v]
+    return bucket_params
+
+
 class SDDatasetWithARB(torch.utils.data.IterableDataset, SDDataset):
-    def __init__(self, batch_size=1, seed=69, debug=False, **kwargs):
+    def __init__(self, bucket_config: DictConfig, batch_size=1, seed=69, **kwargs):
         super().__init__(**kwargs)
-        self.debug = debug
         self.batch_size = batch_size
 
         id_size_map = self.get_id_size_map((entry.path for entry in self.entries))
         self.id_entry_map: dict[str, Item] = {str(entry.path): entry for entry in self.entries}
 
-        bucket_manager = BucketManager(batch_size=batch_size, seed=seed, debug=debug)
-        bucket_manager.gen_buckets()
-        bucket_manager.put_in(id_size_map)
+        bucket_manager = BucketManager(batch_size=batch_size, seed=seed, debug=bucket_config.debug)
+
+        bucket_params = get_gen_bucket_params(self.size, bucket_config)
+        bucket_manager.gen_buckets(**bucket_params)
+        bucket_manager.put_in(id_size_map, bucket_config.max_aspect_error)
 
         self.bucket_manager = bucket_manager
 
@@ -100,19 +127,19 @@ class SDDatasetWithARB(torch.utils.data.IterableDataset, SDDataset):
 
 
 class DBDatasetWithARB(SDDatasetWithARB, DBDataset):
-    def __init__(self, batch_size=1, seed=69, debug=False, **kwargs):
-        super().__init__(batch_size, seed, debug, **kwargs)
+    def __init__(self, bucket_config, batch_size=1, seed=69, **kwargs):
+        super().__init__(bucket_config, batch_size, seed, **kwargs)
 
         self.class_bucket_entry_map = dict[tuple[int, int], list[Item]]()
 
         class_id_size_map = self.get_id_size_map((entry.path for entry in self.class_entries))
         class_id_entry_map: dict[str, Item] = {str(entry.path): entry for entry in self.class_entries}
 
-        class_bucket_manager = BucketManager(batch_size=1, seed=seed, debug=False)
+        class_bucket_manager = BucketManager(batch_size=1, seed=seed, debug=bucket_config.debug)
         class_bucket_manager.buckets = self.bucket_manager.buckets
         class_bucket_manager.base_res = self.bucket_manager.base_res
 
-        class_bucket_manager.put_in(class_id_size_map)
+        class_bucket_manager.put_in(class_id_size_map, max_aspect_error=bucket_config.max_aspect_error)
 
         for batch, size in class_bucket_manager.generator():
             class_id = batch[0]

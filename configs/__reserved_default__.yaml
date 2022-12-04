@@ -36,6 +36,16 @@ med_vram: false
 aspect_ratio_bucket:
   enabled: false
   debug: false
+  c_size: 1.5
+  c_dim: 2
+  c_div: 8
+  max_aspect_error: 0.5
+# Manual, not scaled wrt data.resolution
+#  manual:
+#    base_res: [512, 512]
+#    max_size: 393216
+#    dim_range: [256, 1024]
+#    divisor: 64
 
 clip_stop_at_layer: 1
 pad_tokens: true

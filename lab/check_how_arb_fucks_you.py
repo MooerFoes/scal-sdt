@@ -61,7 +61,10 @@ def arb_transform(source_size: tuple[int, int], size: tuple[int, int]):
 def main(width, height):
     aspect = width / height
     manager = BucketManager(1, 114514)
-    manager.gen_buckets(base_res=(512, 512), max_size=512 * 768, dim_range=(256, 1024), divisor=64)
+
+    dim = 512
+    print('x =', dim)
+    manager.gen_buckets(base_res=(dim, dim), max_size=int(dim * dim * 1.5), dim_range=(dim // 2, dim * 2), divisor=int(dim / 8))
 
     best_fit = min(manager.buckets, key=lambda b: abs(b.aspect - aspect))
     error = abs(best_fit.aspect - aspect)
@@ -72,6 +75,7 @@ def main(width, height):
     print(f"Buckets:\n{resolutions}")
     print(f"Best fit bucket={best_fit.size}, error={error}")
     print(f"Resize {(width, height)} -> {before_crop} before crop")
+
 
 if __name__ == '__main__':
     main()

@@ -9,7 +9,7 @@ from diffusers.pipelines import StableDiffusionPipeline
 from omegaconf import OmegaConf
 from tqdm import tqdm
 
-from modules.dataset.arb_datasets import SDDatasetWithARB
+from modules.dataset.arb_datasets import SDDatasetWithARB, get_gen_bucket_params
 from modules.dataset.bucket import BucketManager
 from modules.dataset.datasets import SDDataset
 from modules.model import load_df_pipeline
@@ -102,19 +102,25 @@ def main(config):
     pipeline.set_progress_bar_config(disable=True)
     pipeline.to("cuda")
 
+    arb_config = config.aspect_ratio_bucket
+
     for i, concept in enumerate(config.data.concepts):
         if not concept.class_set.auto_generate.enabled:
             logger.warning(f"Concept [{i}] skipped because class auto generate is not enabled.")
             continue
 
-        if not config.aspect_ratio_bucket.enabled:
+        if not arb_config.enabled:
             size_dist = {(config.data.resolution, config.data.resolution): 1.0}
         else:
             instance_img_paths = list(SDDataset.get_images(Path(concept.instance_set.path)))
             id_size_map = SDDatasetWithARB.get_id_size_map(instance_img_paths)
+
             bucket_manager = BucketManager(114514, 1919810, 69, 418)
-            bucket_manager.gen_buckets()
-            bucket_manager.put_in(id_size_map)
+            gen_bucket_params = get_gen_bucket_params(config.data.resolution, arb_config)
+            bucket_manager.gen_buckets(**gen_bucket_params)
+
+            bucket_manager.put_in(id_size_map, arb_config.max_aspect_error)
+
             size_dist = {bucket.size: len(bucket.ids) / len(instance_img_paths) for bucket in
                          bucket_manager.buckets}
             assert sum(size_dist.values()) == 1
