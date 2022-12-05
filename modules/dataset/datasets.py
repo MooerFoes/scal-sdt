@@ -112,12 +112,18 @@ class SDDataset(Dataset):
     def __len__(self):
         return len(self.entries)
 
+    def augment(self, image: torch.Tensor):
+        w, h = image.shape[-1], image.shape[-2]
+        image = self.augment_transforms(image)
+        image = transforms.Resize((h, w), interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image)
+        return image
+
     def read_and_transform(self, path):
         # if not self.cached_latents:
         image = self.read_img(path)
         image = self.image_transforms(image)
         if self.augment_transforms is not None:
-            image = self.augment_transforms(image)
+            image = self.augment(image)
         image = transforms.Normalize([0.5], [0.5])(image)
         return image
 

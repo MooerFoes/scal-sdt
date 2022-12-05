@@ -118,7 +118,7 @@ class SDDatasetWithARB(torch.utils.data.IterableDataset, SDDataset):
             print(f"Saved sample: {save_dir / f_id}")
 
         if self.augment_transforms is not None:
-            result = self.augment_transforms(result)
+            result = self.augment(result)
 
         result = transforms.Normalize([0.5], [0.5])(result)
 
