@@ -52,6 +52,7 @@ class SDDatasetWithARB(torch.utils.data.IterableDataset, SDDataset):
         bucket_manager.put_in(id_size_map, bucket_config.max_aspect_error)
 
         self.bucket_manager = bucket_manager
+        self.debug = bucket_config.debug
 
     # def __len__(self):
     #     return self._length // self.batch_size
