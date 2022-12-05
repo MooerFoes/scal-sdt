@@ -87,7 +87,7 @@ class SDDatasetWithARB(torch.utils.data.IterableDataset, SDDataset):
         return w_t, h_t
 
     def get_transform(self, size: tuple[int, int], dsize: tuple[int, int]):
-        h_d, w_d = dsize
+        w_d, h_d = dsize
         w_t, h_t = self.perserve_ratio_size(size, dsize)
 
         return transforms.Compose([
@@ -96,7 +96,7 @@ class SDDatasetWithARB(torch.utils.data.IterableDataset, SDDataset):
             transforms.ToTensor(),
         ])
 
-    def transform(self, img: Image, size: tuple[int, int]):
+    def transform(self, img: Image.Image, size: tuple[int, int]):
         result = self.get_transform(img.size, size)(img)
 
         if self.debug:
