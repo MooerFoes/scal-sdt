@@ -10,6 +10,10 @@ determines how many latest checkpoints should be kept. If your storage is limite
 
 `loggers.wandb`: If you don't want to use WandB, you should remove this entry.
 
+## Default
+
+Defaults are at `configs/__reserved_default__.yaml`.
+
 ## Data Augmentation
 
 Example:
@@ -33,9 +37,10 @@ augment:
 Define a sequence of transforms for augmenting data.
 
 `name`: Full qualifier of a transformer class.
-Can be one
-of `torchvision.transforms`([Reference](https://pytorch.org/vision/stable/transforms.html#transforms-on-pil-image-and-torch-tensor)).
+Can be from `torchvision.transforms`
+([Reference](https://pytorch.org/vision/stable/transforms.html#transforms-on-pil-image-and-torch-tensor)).
 SCAL-SDT itself provides `modules.dataset.augment.RandomRotationWithCrop` for rotate and crop.
+The class needs to have `__call__(torch.Tensor) -> torch.Tensor` implemented.
 
 `params`: Parameters for instantiating the class.
 
