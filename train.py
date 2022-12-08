@@ -1,4 +1,5 @@
 import logging
+from argparse import Namespace
 from pathlib import Path
 from typing import Optional
 
@@ -13,22 +14,12 @@ from modules.sample_callback import SampleCallback
 logger = logging.getLogger()
 
 
-def get_resuming_config(config: DictConfig) -> Optional[DictConfig]:
-    state_dir = Path(config.model, "state")
-    if not (state_dir.is_dir() and
-            (state_dir / "state.pt").is_file()):
-        logger.warning("Checkpoint has no state")
-        return None
-
-    logger.info("Trying to resume training, loading config from checkpoint")
-
-    config_yaml = state_dir / "config.yaml"
+def get_resuming_config(ckpt_path: Path) -> Optional[DictConfig]:
+    config_yaml = ckpt_path.parent / "config.yaml"
     if not config_yaml.is_file():
-        logger.warning("Checkpoint has no config")
         return None
 
-    logger.warning("Merging: checkpoint's config -> provided config")
-    return OmegaConf.merge(config, OmegaConf.load(config_yaml))
+    return OmegaConf.load(config_yaml)
 
 
 def generate_run_id() -> str:
@@ -40,22 +31,24 @@ def get_params():
     args = parser.parse_args()
 
     config = OmegaConf.load('configs/__reserved_default__.yaml')
+
+    if args.resume:
+        logger.info("Trying to resume training, loading config from checkpoint")
+        resume_config = get_resuming_config(args.resume)
+        if resume_config:
+            config = OmegaConf.merge(config, resume_config)
+        else:
+            logger.warning("Config not found for the checkpoint specified")
+
     config = OmegaConf.merge(config, OmegaConf.load(args.config))
 
     if args.run_id is None:
         args.run_id = generate_run_id()
 
-    if args.resume:
-        result = get_resuming_config(config)
-        if result:
-            config = result
-        else:
-            logger.warning("Not normally resuming checkpoint")
-
     return args, config
 
 
-def verify_config(config):
+def verify_config(config: DictConfig):
     concepts = config.data.concepts
     assert any(concepts)
 
@@ -69,7 +62,7 @@ def verify_config(config):
             "Prior preservation loss is enabled, but not all concepts have class set specified"
 
 
-def get_loggers(config):
+def get_loggers(config: DictConfig):
     project_dir = Path(config.output_dir, config.project)
 
     train_loggers = list[pl.loggers.Logger]()
@@ -90,7 +83,7 @@ def main(args, config):
     ckpt_save_dir = Path(config.output_dir, config.project, args.run_id)
     ckpt_save_dir.mkdir(parents=True, exist_ok=True)
 
-    if config.seed:
+    if config.seed is not None:
         pl.seed_everything(config.seed)
 
     model = load_model(config)
@@ -116,7 +109,10 @@ def main(args, config):
     )
 
     trainer.tune(model=model)
-    trainer.fit(model=model, ckpt_path=ckpt_save_dir if args.resume else None)
+
+    OmegaConf.save(config, ckpt_save_dir / "config.yaml")
+
+    trainer.fit(model=model, ckpt_path=args.resume)
 
 
 if __name__ == "__main__":

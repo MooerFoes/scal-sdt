@@ -19,10 +19,9 @@ parser.add_argument(
 )
 parser.add_argument(
     "--resume",
-    default=False,
-    action="store_true",
-    help="""Whether to resume from the config and the run id.
-If not, load optimizer state etc will not be loaded."""
+    type=str,
+    default=None,
+    help="Resume from the specified checkpoint path. Corresponding config will be loaded if exists."
 )
 
 pl.Trainer.add_argparse_args(parser)
