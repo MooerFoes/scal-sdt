@@ -55,7 +55,7 @@ checkpoint:
   mode: 'max'
 
 trainer:
-  accelerator: gpu
+  accelerator: 'gpu'
   devices: -1
   auto_select_gpus: true
   precision: 16
