@@ -77,7 +77,7 @@ def get_loggers(config: DictConfig):
     return train_loggers
 
 
-def main(args, config):
+def main(args: Namespace, config: DictConfig):
     verify_config(config)
 
     ckpt_save_dir = Path(config.output_dir, config.project, args.run_id)

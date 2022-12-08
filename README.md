@@ -32,7 +32,8 @@ pip install -r requirements.txt
 
 ### Config
 
-Setup a config file first. Documentation: `configs/config.md`.
+Setup a config file first. Documentation: `configs/README.md`.
+([Link](https://github.com/CCRcmcpe/scal-sdt/blob/main/configs/README.md))
 
 `configs/native.yaml` (for native training) and `configs/dreambooth.yaml` (for DreamBooth) provided as examples.
 
