@@ -57,8 +57,7 @@ def main(checkpoint, output,
 
     if format is None:
         infered_format = infer_format_from_path(output)
-        if infered_format is None:
-            raise "Must specify a known extension or format"
+        assert infered_format is not None, "Must specify a known extension or format"
 
         format = infered_format
 

@@ -6,7 +6,8 @@ output_dir: 'output'
 project: 'SCAL-SDT'
 
 batch_size: 1
-seed: None
+num_workers: null
+seed: null
 train_text_encoder: false
 gradient_checkpointing: false
 med_vram: false

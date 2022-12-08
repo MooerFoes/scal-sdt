@@ -1,13 +1,17 @@
 import time
+from collections.abc import Hashable
 from dataclasses import dataclass, field
+from typing import Optional, Generic, TypeVar
 
 import numpy as np
+
+from . import Size
 
 
 @dataclass
 class Bucket:
-    size: tuple[int, int]
-    ids: list[str] = field(default_factory=list[str])
+    size: Size
+    ids: list[Hashable] = field(default_factory=list[Hashable])
 
     def __hash__(self) -> int:
         return self.size.__hash__()
@@ -20,12 +24,15 @@ class Bucket:
         return float(self.size[0]) / float(self.size[1])
 
 
-class BucketManager:
+T_id = TypeVar("T_id", bound=Hashable)
+
+
+class BucketManager(Generic[T_id]):
     buckets: list[Bucket]
-    id_size_map: dict[str, tuple[int, int]]
-    base_res: tuple[int, int]
-    epoch: dict[Bucket, list[str]] | None = None
-    left_over: list[str] | None = None
+    id_size_map: dict[T_id, Size] = {}
+    base_res: Size
+    epoch: Optional[dict[Bucket, list[T_id]]] = None
+    left_over: Optional[list[T_id]] = None
     batch_total = 0
     batch_delivered = 0
 
@@ -37,6 +44,9 @@ class BucketManager:
         epoch_seed = self.prng.tomaxint() % (2 ** 32 - 1)
         self.epoch_prng = self.get_prng(epoch_seed)  # separate prng for sharding use for increased thread resilience
         self.debug = debug
+
+    def __len__(self):
+        return len(self.id_size_map) // self.batch_size
 
     @staticmethod
     def get_prng(seed: int):
@@ -79,7 +89,7 @@ class BucketManager:
             print(f"Bucket sizes:\n{resolutions}")
             print(f"Time: {timer:.5f}s")
 
-    def put_in(self, id_size_map: dict[str, tuple[int, int]], max_aspect_error=0.5):
+    def put_in(self, id_size_map: dict[T_id, Size], max_aspect_error=0.5):
         if self.debug:
             timer = time.perf_counter()
 
@@ -120,7 +130,7 @@ Skipped Images: {skipped_ids}
         self.batch_delivered = 0
 
         # select ids for this epoch/rank
-        index = sorted(list(self.id_size_map.keys()))
+        index = list(self.id_size_map.keys())
         index_len = len(index)
         index = self.epoch_prng.permutation(index)
         index = index[:index_len - (index_len % (self.batch_size * self.world_size))]
@@ -163,11 +173,11 @@ Skipped Images: {skipped_ids}
 
         resolution = self.base_res
         found_batch = False
-        batch_buckets = list[str]()
-        chosen_bucket: Bucket | None = None
+        batch_buckets = list[T_id]()
+        chosen_bucket: Optional[Bucket] = None
 
         while not found_batch:
-            buckets: list[Bucket | None] = list(self.epoch.keys())
+            buckets: list[Optional[Bucket]] = list(self.epoch.keys())
             if len(self.left_over) >= self.batch_size:
                 bucket_probs = [len(self.left_over)] + [len(self.epoch[bucket]) for bucket in buckets]
                 buckets = [None] + buckets

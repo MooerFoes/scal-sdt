@@ -14,7 +14,8 @@ from diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel, Stable
 from transformers import CLIPTokenizer
 
 from modules.clip import CLIPWithSkip
-from modules.utils import get_class
+from modules.dataset import get_dataset, collate_fn, get_sampler
+from modules.utils import get_class, physical_core_count
 
 logger = logging.getLogger()
 
@@ -203,6 +204,20 @@ class StableDiffusionModel(pl.LightningModule):
 
     def test_step(self, batch, batch_idx):
         pass
+
+    def train_dataloader(self):
+        train_dataset = get_dataset(self.config, self.tokenizer)
+
+        sampler = get_sampler(train_dataset, self.config, self.trainer.world_size, self.trainer.global_rank)
+
+        train_dataloader = torch.utils.data.DataLoader(
+            train_dataset,
+            sampler=sampler,
+            batch_size=self.config.batch_size,
+            collate_fn=collate_fn,
+            num_workers=physical_core_count() if self.config.num_workers is None else self.config.num_workers
+        )
+        return train_dataloader
 
     def configure_optimizers(self):
         params_to_optimize = itertools.chain(self.unet.parameters(), self.text_encoder.parameters()) \

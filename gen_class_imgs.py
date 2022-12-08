@@ -9,22 +9,23 @@ from diffusers.pipelines import StableDiffusionPipeline
 from omegaconf import OmegaConf
 from tqdm import tqdm
 
-from modules.dataset.arb_datasets import SDDatasetWithARB, get_gen_bucket_params
+from modules.dataset import Size
 from modules.dataset.bucket import BucketManager
-from modules.dataset.datasets import SDDataset
+from modules.dataset.samplers import get_id_size_map, get_gen_bucket_params
 from modules.model import load_df_pipeline
+from modules.utils import list_images
 
 logger = logging.getLogger("cls-gen")
 
 
-def generate_class_images(pipeline: StableDiffusionPipeline, concept, size_dist: dict[tuple[int, int], float]):
+def generate_class_images(pipeline: StableDiffusionPipeline, concept, size_dist: dict[Size, float]):
     autogen_config = concept.class_set.auto_generate
 
     class_images_dir = Path(concept.class_set.path)
     class_images_dir.mkdir(parents=True, exist_ok=True)
 
-    cur_class_images = list(SDDataset.get_images(class_images_dir))
-    class_id_size_map = SDDatasetWithARB.get_id_size_map(cur_class_images)
+    cur_class_images = list(list_images(class_images_dir))
+    class_id_size_map = get_id_size_map(cur_class_images)
 
     cur_dist = {size: len([k for k in class_id_size_map.keys() if class_id_size_map[k] == size]) for id, size in
                 class_id_size_map.items()}
@@ -112,10 +113,10 @@ def main(config):
         if not arb_config.enabled:
             size_dist = {(config.data.resolution, config.data.resolution): 1.0}
         else:
-            instance_img_paths = list(SDDataset.get_images(Path(concept.instance_set.path)))
-            id_size_map = SDDatasetWithARB.get_id_size_map(instance_img_paths)
+            instance_img_paths = list(list_images(Path(concept.instance_set.path)))
+            id_size_map = get_id_size_map(instance_img_paths)
 
-            bucket_manager = BucketManager(114514, 1919810, 69, 418)
+            bucket_manager = BucketManager[int](114514, 1919810, 69, 418)
             gen_bucket_params = get_gen_bucket_params(config.data.resolution, arb_config)
             bucket_manager.gen_buckets(**gen_bucket_params)
 

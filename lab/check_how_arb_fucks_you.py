@@ -3,6 +3,8 @@ from pathlib import Path
 
 import click
 
+from modules.dataset import Size
+
 parent = str(Path(__file__).parent.parent.absolute())
 sys.path.append(parent)
 
@@ -37,7 +39,7 @@ def gen_buckets(base_res=(512, 512), max_size=512 * 768, dim_range=(256, 1024), 
     return sorted(buckets, key=lambda sz: sz[0] * 4096 - sz[1])
 
 
-def arb_transform(source_size: tuple[int, int], size: tuple[int, int]):
+def arb_transform(source_size: Size, size: Size):
     x, y = source_size
     short, long = (x, y) if x <= y else (y, x)
 

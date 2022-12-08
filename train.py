@@ -1,24 +1,19 @@
 import logging
-from collections.abc import Iterable
 from pathlib import Path
+from typing import Optional
 
 import pytorch_lightning as pl
-import torch
-import torch.utils.checkpoint
-import torch.utils.data
 from omegaconf import OmegaConf, DictConfig
 from pytorch_lightning.callbacks import ModelCheckpoint
-from transformers import CLIPTokenizer
 
 from modules.args import parser
-from modules.dataset.datasets import Item
 from modules.model import load_model
 from modules.sample_callback import SampleCallback
 
 logger = logging.getLogger()
 
 
-def get_resuming_config(config: DictConfig) -> DictConfig | None:
+def get_resuming_config(config: DictConfig) -> Optional[DictConfig]:
     state_dir = Path(config.model, "state")
     if not (state_dir.is_dir() and
             (state_dir / "state.pt").is_file()):
@@ -57,84 +52,7 @@ def get_params():
         else:
             logger.warning("Not normally resuming checkpoint")
 
-    OmegaConf.set_readonly(config, True)
     return args, config
-
-
-def collate_fn(batch: Iterable[Item | tuple[Item, Item]]):
-    token_ids_array = list[list[int]]()
-    images_array = list[torch.Tensor]()
-
-    # Cache
-    # conditions_array = list[torch.Tensor]()
-    # latents_array = list[torch.Tensor]()
-
-    class_items = []
-
-    def append(item: Item):
-        token_ids_array.append(item.token_ids)
-        images_array.append(item.image)
-        # conditions_array.append(item.latent)
-        # latents_array.append(item.condition)
-
-    for x in batch:
-        if isinstance(x, tuple):
-            x: tuple[Item, Item]
-            instance_item, class_item = x
-            append(instance_item)
-            class_items.append(class_item)
-        else:
-            x: Item
-            append(x)
-
-    for class_item in class_items:
-        append(class_item)
-
-    images = torch.stack(images_array)
-    images = images.to(dtype=torch.float32, memory_format=torch.contiguous_format)
-
-    token_ids = torch.tensor(token_ids_array, dtype=torch.int64)
-
-    # conditions = torch.stack(conditions_array)
-    #
-    # latents = torch.stack(latents_array)
-
-    batch = {
-        "token_ids": token_ids,
-        "images": images,
-        # "conditions": conditions,
-        # "latents": latents
-    }
-    return batch
-
-
-def get_dataset(config, tokenizer: CLIPTokenizer):
-    if config.aspect_ratio_bucket.enabled:
-        if config.prior_preservation.enabled:
-            from modules.dataset.arb_datasets import DBDatasetWithARB
-            dataset_type = DBDatasetWithARB
-        else:
-            from modules.dataset.arb_datasets import SDDatasetWithARB
-            dataset_type = SDDatasetWithARB
-    else:
-        if config.prior_preservation.enabled:
-            from modules.dataset.datasets import DBDataset
-            dataset_type = DBDataset
-        else:
-            from modules.dataset.datasets import SDDataset
-            dataset_type = SDDataset
-
-    return dataset_type(
-        concepts=config.data.concepts,
-        tokenizer=tokenizer,
-        size=config.data.resolution,
-        center_crop=config.data.center_crop,
-        pad_tokens=config.pad_tokens,
-        batch_size=config.batch_size,
-        augment_config=config.get("augment"),
-        bucket_config=config.aspect_ratio_bucket,
-        seed=config.seed
-    )
 
 
 def verify_config(config):
@@ -143,8 +61,12 @@ def verify_config(config):
 
     if not config.prior_preservation.enabled:
         logger.info("Running: Standard Finetuning")
+        if any(concept for concept in concepts if concept.get("class_set") is not None):
+            logger.warning("Prior preservation loss is disabled, but there's concept with class set specified")
     else:
         logger.info("Running: DreamBooth")
+        assert all(concept.get("class_set") is not None for concept in concepts), \
+            "Prior preservation loss is enabled, but not all concepts have class set specified"
 
 
 def get_loggers(config):
@@ -173,20 +95,12 @@ def main(args, config):
 
     model = load_model(config)
 
-    train_dataset = get_dataset(config, model.tokenizer)
     # TODO
     # if not ("augment" in config.data and any(config.data.augment)):
     # if config.train_text_encoder:
     #     train_dataset.do_cache(model.vae)
     # else:
     #     train_dataset.do_cache(model.vae, model.text_encoder)
-
-    train_dataloader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=config.batch_size,
-        collate_fn=collate_fn,
-        num_workers=8
-    )
 
     loggers = get_loggers(config)
 
@@ -202,11 +116,7 @@ def main(args, config):
     )
 
     trainer.tune(model=model)
-    trainer.fit(
-        model=model,
-        ckpt_path=ckpt_save_dir if args.resume else None,
-        train_dataloaders=train_dataloader
-    )
+    trainer.fit(model=model, ckpt_path=ckpt_save_dir if args.resume else None)
 
 
 if __name__ == "__main__":
