@@ -124,7 +124,8 @@ class StableDiffusionModel(pl.LightningModule):
             if config.train_text_encoder:
                 text_encoder.gradient_checkpointing_enable()
 
-        self.unet.set_use_memory_efficient_attention_xformers(config.xformers)
+        if config.xformers:
+            self.unet.set_use_memory_efficient_attention_xformers(True)
 
         self.pipeline = StableDiffusionPipeline(vae, text_encoder, tokenizer, unet, noise_scheduler)
         self.pipeline.set_progress_bar_config(disable=True)
