@@ -15,7 +15,11 @@ Defaults are at `configs/__reserved_default__.yaml`.
 `model`: Path to a saved diffusers SD pipeline or a HuggingFace model identifier.
 Only Diffusers format is currently supported, i.e. you cannot directly put a original SD checkpoint.
 
-`loggers.wandb`: If you don't want to use WandB, you should remove this entry.
+`loggers.wandb`: If you don't want to use WandB, you should remove this entry, or disable wandb by:
+
+```shell
+wandb disabled
+```
 
 ## Trainer
 
@@ -69,6 +73,7 @@ SCAL-SDT has the ability to do this automatically.
 | `linear` | `lr = lr * effective_bsz`       |
 
 `lr_scheduler`: Most of the time you want to use the default LR scheduler (cosine annealing).
+
 `T_max` should be identical to `trainer.max_epochs`.
 
 Refer to [PyTorch docs](https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate)
@@ -83,7 +88,9 @@ Config section: `aspect_ratio_bucket`.
 By default, parameters are scaled wrt `data.resolution` (`b`), with scaling coefficients:
 
 `c_size`: Maximum area of the largest bucket = `b ^ 2 * c_size`.
+
 `c_dim`: Range of bucket dimension = `[b / c_dim, b * c_dim]`.
+
 `c_div`: Step size to find buckets = `b / c_div`.
 
 For overriding the scaling, refer to the default config.
@@ -113,6 +120,7 @@ Define a sequence of transforms for augmenting data.
 `name`: Full qualifier of a transformer class.
 Can be from `torchvision.transforms`
 ([Reference](https://pytorch.org/vision/stable/transforms.html#transforms-on-pil-image-and-torch-tensor)).
+
 SCAL-SDT itself provides `modules.dataset.augment.RandomRotationWithCrop` for rotate and crop.
 The class needs to have `__call__(torch.Tensor) -> torch.Tensor` implemented.
 
