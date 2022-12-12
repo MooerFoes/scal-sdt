@@ -16,47 +16,52 @@ Stable Diffusion trainer with scalable dataset size and hardware usage.
 
 ### Install Requirements
 
-Linux is recommended. (If you care to install `bitsandbytes` on Windows)
+Linux is recommended, on Windows you have to install `bitsandbytes` manually for int8 optimizers.
 
-Python 3.10. Will not work on 3.7.  
-Torch 1.13 and CUDA 11.6. Match exact version is recommended but not required.
+#### Conda
 
-[xformers](https://github.com/facebookresearch/xformers) is required for efficient VRAM usage. Easiest way to install it
-is `conda install -c "xformers/label/dev" xformers`.
+```shell
+conda env create environment.yml
+conda activate ssdt
+```
 
-WandB (`pip install wandb`) is recommended for logging stats and previews.
+#### Pip
 
-```sh
+CUDA toolkit and torch should be installed manually.
+
+```shell
 pip install -r requirements.txt
 ```
 
 ### Config
 
-Documentation: `configs/README.md`.
+**Documentation**: `configs/README.md`.
 ([Link](https://github.com/CCRcmcpe/scal-sdt/blob/main/configs/README.md))
 
 `configs/native.yaml` (for native training) and `configs/dreambooth.yaml` (for DreamBooth) provided as examples.
 
-### Then?
+### Run
 
 If you are running native training, proceed to the next step.  
 If you are running DreamBooth, run this to generate class (regularization) images:
 
-```sh
+```shell
 python gen_class_imgs.py --config configs/your_config.yaml
 ```
 
 Then run the training:
 
-```sh
+```shell
 python train.py --config configs/your_config.yaml
 ```
+
+### After Training
 
 Note although the checkpoints have `.ckpt` extension, they are NOT directly usable to interfaces based on
 the [official SD code base](https://github.com/CompVis/stable-diffusion)
 like [WebUI](https://github.com/AUTOMATIC1111/stable-diffusion-webui). To convert them into SD checkpoints:
 
-```sh
+```shell
 python convert_to_sd.py PATH_TO_THE_CKPT OUTPUTDIR --no-text-encoder --unet-dtype fp16
 ```
 

@@ -1,0 +1,30 @@
+name: ssdt
+channels:
+  - pytorch
+  - xformers/label/dev
+  - nvidia/label/cuda-11.6.2
+  - huggingface
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - cuda-toolkit
+  - pytorch
+  - torchvision
+  - torchaudio
+  - pytorch-cuda=11.6
+  - pillow
+  - transformers
+  - omegaconf
+  - pytorch-lightning
+  - numpy
+  - tqdm
+  - click
+  - ftfy
+  - accelerate
+  - psutil
+  - xformers
+  - wandb
+  - pip:
+      - bitsandbytes~=0.35
+      - git+https://github.com/CCRcmcpe/diffusers.git
