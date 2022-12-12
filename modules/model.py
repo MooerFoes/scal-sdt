@@ -146,7 +146,31 @@ class StableDiffusionModel(pl.LightningModule):
 
         return latents
 
-    def _encode_token_ids(self, token_ids):
+    def _encode_token_ids(self, token_ids: torch.Tensor):
+        with self._text_encode_context:
+            return self.text_encoder.forward(token_ids).last_hidden_state
+
+    def _get_embedding(self, token_ids: torch.Tensor):
+        uc_conf = self.config.uncond
+
+        if not (uc_conf.enabled and torch.rand(1) < uc_conf.p):
+            return self._encode_token_ids(token_ids)
+
+        bsz, length = token_ids.shape
+        encoder_config = self.text_encoder.config
+
+        match uc_conf.cond:
+            case "zeros":
+                return torch.zeros(bsz, length, encoder_config.projection_dim, device="cuda")
+            case "bos":
+                fill_token_id = encoder_config.bos_token_id
+            case "eos":
+                fill_token_id = encoder_config.eos_token_id
+            case _:
+                raise Exception("Invalid uncond.cond")
+
+        token_ids = torch.full((bsz, length), fill_token_id, device="cuda")
+
         with self._text_encode_context:
             return self.text_encoder.forward(token_ids).last_hidden_state
 
@@ -173,7 +197,7 @@ class StableDiffusionModel(pl.LightningModule):
         #     conds = self.text_encoder.forward(batch["token_ids"])
         # else:
         #     conds = batch.conds
-        conds = self._encode_token_ids(batch["token_ids"])
+        conds = self._get_embedding(batch["token_ids"])
 
         # Predict the noise residual
         noise_pred = self.unet(noisy_latents, timesteps, conds).sample

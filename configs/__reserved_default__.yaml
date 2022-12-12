@@ -20,6 +20,12 @@ data:
   center_crop: false
   concepts: [ ]
 
+uncond:
+  # https://openreview.net/pdf?id=lsQCDXjOl3k
+  enabled: false
+  p: 0.1
+  cond: 'zeros'
+
 checkpoint:
   filename: '{epoch}-{train_loss:.2f}'
   auto_insert_metric_name: true
