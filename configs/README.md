@@ -74,6 +74,20 @@ SCAL-SDT has the ability to do this automatically.
 Refer to [PyTorch docs](https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate)
 for more LR schedulers.
 
+## Aspect Ratio Bucketing (ARB)
+
+Config section: `aspect_ratio_bucket`.
+
+`debug`: Output debug logs and save sample of cropped images before augmentation.
+
+By default, parameters are scaled wrt `data.resolution` (`b`), with scaling coefficients:
+
+`c_size`: Maximum area of the largest bucket = `b ^ 2 * c_size`.
+`c_dim`: Range of bucket dimension = `[b / c_dim, b * c_dim]`.
+`c_div`: Step size to find buckets = `b / c_div`.
+
+For overriding the scaling, refer to the default config.
+
 ## Data Augmentation
 
 Config section: `augment`. Example:
