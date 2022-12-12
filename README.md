@@ -78,4 +78,5 @@ You may change `trainer.accelerator`.
 
 ### Advanced
 
-Check out the [wiki](https://github.com/CCRcmcpe/scal-sdt/wiki). Contains some information for training efficiently.
+* [Config Documentation](https://github.com/CCRcmcpe/scal-sdt/blob/main/configs/README.md)
+* [SCAL-SDT Wiki](https://github.com/CCRcmcpe/scal-sdt/wiki)
