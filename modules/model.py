@@ -115,9 +115,9 @@ class StableDiffusionModel(pl.LightningModule):
         self.vae.requires_grad_(False)
         if not config.train_text_encoder:
             self.text_encoder.requires_grad_(False)
-            self._text_encode_context = torch.no_grad()
+            self._text_encode_context_cls = torch.no_grad
         else:
-            self._text_encode_context = nullcontext()
+            self._text_encode_context_cls = nullcontext
 
         if config.gradient_checkpointing:
             unet.enable_gradient_checkpointing()
@@ -147,7 +147,7 @@ class StableDiffusionModel(pl.LightningModule):
         return latents
 
     def _encode_token_ids(self, token_ids: torch.Tensor):
-        with self._text_encode_context:
+        with self._text_encode_context_cls():
             return self.text_encoder.forward(token_ids).last_hidden_state
 
     def _get_embedding(self, token_ids: torch.Tensor):
@@ -171,7 +171,7 @@ class StableDiffusionModel(pl.LightningModule):
 
         token_ids = torch.full((bsz, length), fill_token_id, device="cuda")
 
-        with self._text_encode_context:
+        with self._text_encode_context_cls:
             return self.text_encoder.forward(token_ids).last_hidden_state
 
     def training_step(self, batch, batch_idx):
@@ -224,12 +224,6 @@ class StableDiffusionModel(pl.LightningModule):
         })
         return loss
 
-    def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any:
-        pass
-
-    def test_step(self, batch, batch_idx):
-        pass
-
     def train_dataloader(self):
         train_dataset = get_dataset(self.config, self.tokenizer)
 
@@ -240,7 +234,9 @@ class StableDiffusionModel(pl.LightningModule):
             sampler=sampler,
             batch_size=self.config.batch_size,
             collate_fn=collate_fn,
-            num_workers=physical_core_count() if self.config.num_workers is None else self.config.num_workers
+            num_workers=min(physical_core_count() if self.config.num_workers is None else self.config.num_workers,
+                            self.config.batch_size),
+            persistent_workers=True
         )
         return train_dataloader
 
