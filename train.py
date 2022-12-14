@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 import pytorch_lightning as pl
+import torch
 from omegaconf import OmegaConf, DictConfig
 from pytorch_lightning.callbacks import ModelCheckpoint
 
@@ -32,15 +33,18 @@ def get_params():
 
     config = OmegaConf.load('configs/__reserved_default__.yaml')
 
+    assert args.resume or args.config, "Either resume or config must be specified"
+
     if args.resume:
         logger.info("Trying to resume training, loading config from checkpoint")
-        resume_config = get_resuming_config(args.resume)
+        resume_config = get_resuming_config(Path(args.resume))
         if resume_config:
             config = OmegaConf.merge(config, resume_config)
         else:
             logger.warning("Config not found for the checkpoint specified")
 
-    config = OmegaConf.merge(config, OmegaConf.load(args.config))
+    if args.config:
+        config = OmegaConf.merge(config, OmegaConf.load(args.config))
 
     if args.run_id is None:
         args.run_id = generate_run_id()
@@ -77,7 +81,24 @@ def get_loggers(config: DictConfig):
     return train_loggers
 
 
+def do_disable_amp_hack(model, config, trainer):
+    match config.trainer.precision:
+        case 16:
+            model.unet = model.unet.to(torch.float16)
+        case "bf16":
+            model.unet = model.unet.to(torch.bfloat16)
+
+    # Dirty hack to silent "Attempting to unscale FP16 gradients"
+    from pytorch_lightning.plugins import PrecisionPlugin
+    precision_plugin = PrecisionPlugin()
+    precision_plugin.precision = config.trainer.precision
+    trainer.strategy.precision_plugin = precision_plugin
+
+
 def main(args: Namespace, config: DictConfig):
+    import pydevd_pycharm
+    pydevd_pycharm.settrace('10.0.0.1', port=1145, stdoutToServer=True, stderrToServer=True)
+
     verify_config(config)
 
     ckpt_save_dir = Path(config.output_dir, config.project, args.run_id)
@@ -108,7 +129,14 @@ def main(args: Namespace, config: DictConfig):
         **config.trainer
     )
 
-    trainer.tune(model=model)
+    if config.unet_cast_precision:
+        logger.info("Using direct cast, forcibly disabling AMP")
+        do_disable_amp_hack(model, config, trainer)
+
+    if args.resume is None:
+        trainer.tune(model=model)
+    else:
+        logger.info("Resuming, will not tune hyperparams")
 
     OmegaConf.save(config, ckpt_save_dir / "config.yaml")
 

@@ -179,7 +179,7 @@ class StableDiffusionModel(pl.LightningModule):
         #     latents = batch.latents
         # else:
         #     latents = self.vae_encode(batch["images"])
-        latents = self._vae_encode(batch["images"])
+        latents = self._vae_encode(batch["images"]).to(self.unet.dtype)
 
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents)
@@ -197,7 +197,7 @@ class StableDiffusionModel(pl.LightningModule):
         #     conds = self.text_encoder.forward(batch["token_ids"])
         # else:
         #     conds = batch.conds
-        conds = self._get_embedding(batch["token_ids"])
+        conds = self._get_embedding(batch["token_ids"]).to(self.unet.dtype)
 
         # Predict the noise residual
         noise_pred = self.unet(noisy_latents, timesteps, conds).sample
