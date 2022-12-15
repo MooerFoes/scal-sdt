@@ -126,7 +126,7 @@ def main(args: Namespace, config: DictConfig):
         **config.trainer
     )
 
-    if config.unet_cast_precision:
+    if config.force_disable_amp:
         logger.info("Using direct cast, forcibly disabling AMP")
         do_disable_amp_hack(model, config, trainer)
 
