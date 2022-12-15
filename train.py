@@ -96,9 +96,6 @@ def do_disable_amp_hack(model, config, trainer):
 
 
 def main(args: Namespace, config: DictConfig):
-    import pydevd_pycharm
-    pydevd_pycharm.settrace('10.0.0.1', port=1145, stdoutToServer=True, stderrToServer=True)
-
     verify_config(config)
 
     ckpt_save_dir = Path(config.output_dir, config.project, args.run_id)
