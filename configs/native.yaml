@@ -45,6 +45,8 @@ checkpoint:
   mode: 'max'
 
 trainer:
+  # strategy: 'ddp_find_unused_parameters_false'
+  # num_nodes: 2
   accelerator: 'gpu'
   devices: -1
   auto_select_gpus: true
