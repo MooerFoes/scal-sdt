@@ -123,6 +123,7 @@ def main(args: Namespace, config: DictConfig):
             SampleCallback(ckpt_save_dir / "samples")
         ],
         benchmark=not config.aspect_ratio_bucket.enabled,
+        replace_sampler_ddp=not config.aspect_ratio_bucket.enabled,
         **config.trainer
     )
 

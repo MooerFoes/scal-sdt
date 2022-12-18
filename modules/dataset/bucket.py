@@ -48,6 +48,10 @@ class BucketManager(Generic[T_id]):
     def __len__(self):
         return len(self.id_size_map) // self.batch_size
 
+    @property
+    def epoch_empty(self):
+        return self.batch_delivered >= self.batch_total
+
     @staticmethod
     def get_prng(seed: int):
         return np.random.RandomState(seed)
@@ -223,7 +227,7 @@ get_batch: {timer:.5f}s"""
         return batch_buckets, resolution
 
     def generator(self):
-        if self.batch_delivered >= self.batch_total:
+        if self.epoch_empty:
             self.start_epoch()
-        while self.batch_delivered < self.batch_total:
+        while not self.epoch_empty:
             yield self.get_batch()

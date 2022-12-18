@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from PIL import Image
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import Sampler
 from tqdm.auto import tqdm
 
@@ -23,19 +23,19 @@ def scale_bucket_params(dim: int, c_size: float, c_dim: float, c_div: float):
 
 
 def get_gen_bucket_params(dim: int, bucket_config: DictConfig):
-    bucket_params = bucket_config.get("manual")
-    if bucket_params is None:
-        bucket_params = scale_bucket_params(
-            dim,
-            bucket_config.c_size,
-            bucket_config.c_dim,
-            bucket_config.c_div
-        )
-    else:
-        for k, v in bucket_params:
-            if isinstance(v, tuple):
-                bucket_params[k] = [x for x in v]
-    return bucket_params
+    params = scale_bucket_params(
+        dim,
+        bucket_config.c_size,
+        bucket_config.c_dim,
+        bucket_config.c_div
+    )
+
+    manual = bucket_config.get("manual")
+
+    if manual is not None:
+        params = OmegaConf.merge(params, manual)
+
+    return params
 
 
 def get_id_size_map(paths: Iterable[Path]) -> dict[int, Size]:
@@ -115,7 +115,10 @@ class AspectSampler(Sampler):
             yield from (Index(index, size) for index in batch)
 
     def __len__(self):
-        return len(self.bucket_manager) * self.bucket_manager.batch_size
+        if self.bucket_manager.epoch_empty:
+            self.bucket_manager.start_epoch()
+
+        return self.bucket_manager.batch_total
 
 
 class AspectSamplerDB(Sampler):
@@ -169,7 +172,10 @@ class AspectSamplerDB(Sampler):
                 yield Index(instance_id, instance_size), Index(class_id, instance_size)
 
     def __len__(self):
-        return len(self.bucket_manager) * self.bucket_manager.batch_size
+        if self.bucket_manager.epoch_empty:
+            self.bucket_manager.start_epoch()
+
+        return self.bucket_manager.batch_total
 
     def _get_closest_class_entries_to_size(self, size):
         target_aspect = size[0] / size[1]

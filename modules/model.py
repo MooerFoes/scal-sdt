@@ -171,8 +171,7 @@ class StableDiffusionModel(pl.LightningModule):
 
         token_ids = torch.full((bsz, length), fill_token_id, device="cuda")
 
-        with self._text_encode_context_cls:
-            return self.text_encoder.forward(token_ids).last_hidden_state
+        return self.text_encoder.forward(token_ids).last_hidden_state
 
     def training_step(self, batch, batch_idx):
         # if batch.latents is not None:
@@ -219,7 +218,7 @@ class StableDiffusionModel(pl.LightningModule):
             loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")
 
         self.log_dict({
-            "train_loss": loss,
+            "train_loss": loss.item(),
             "lr": self.lr_schedulers().get_lr()[0]
         })
         return loss
@@ -234,8 +233,7 @@ class StableDiffusionModel(pl.LightningModule):
             sampler=sampler,
             batch_size=self.config.batch_size,
             collate_fn=collate_fn,
-            num_workers=min(physical_core_count() if self.config.num_workers is None else self.config.num_workers,
-                            self.config.batch_size),
+            num_workers=physical_core_count() if self.config.num_workers is None else self.config.num_workers,
             persistent_workers=True
         )
         return train_dataloader
@@ -253,6 +251,12 @@ class StableDiffusionModel(pl.LightningModule):
                 "frequency": 1
             }
         }
+
+    def on_load_checkpoint(self, checkpoint: dict[str, Any]):
+        super().on_load_checkpoint(checkpoint)
+
+    def on_save_checkpoint(self, checkpoint: dict[str, Any]):
+        super().on_save_checkpoint(checkpoint)
 
     def optimizer_zero_grad(self, epoch, batch_idx, optimizer, optimizer_idx):
         optimizer.zero_grad(set_to_none=True)
