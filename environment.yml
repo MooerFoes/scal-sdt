@@ -15,6 +15,7 @@ dependencies:
   - pytorch-cuda=11.6
   - pillow
   - transformers
+  - diffusers
   - omegaconf
   - pytorch-lightning
   - numpy
@@ -23,8 +24,7 @@ dependencies:
   - ftfy
   - accelerate
   - psutil
-  - xformers
+  - xformers=0.0.15.dev343+git.1b1fd8a
   - wandb
   - pip:
       - bitsandbytes~=0.35
-      - git+https://github.com/CCRcmcpe/diffusers.git
