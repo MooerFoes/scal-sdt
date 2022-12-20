@@ -12,9 +12,9 @@ import torch.utils.checkpoint
 import torch.utils.data
 from diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel, StableDiffusionPipeline
 from omegaconf import DictConfig, OmegaConf
-from transformers import CLIPTokenizer
+from transformers import CLIPTokenizer, CLIPTextModel
 
-from modules.clip import CLIPWithSkip
+from modules.clip import hook_forward
 from modules.convert.common import load_state_dict
 from modules.dataset import get_dataset, collate_fn, get_sampler
 from modules.utils import get_class, physical_core_count
@@ -69,7 +69,7 @@ def load_df_pipeline(path: str, vae: Optional[str] = None):
     else:
         vae = AutoencoderKL.from_pretrained(vae)
 
-    text_encoder = CLIPWithSkip.from_pretrained(path, subfolder="text_encoder")
+    text_encoder = CLIPTextModel.from_pretrained(path, subfolder="text_encoder")
 
     return unet, vae, text_encoder
 
@@ -118,7 +118,7 @@ class StableDiffusionModel(pl.LightningModule):
                  config: DictConfig,
                  unet: UNet2DConditionModel,
                  vae: AutoencoderKL,
-                 text_encoder: CLIPWithSkip,
+                 text_encoder: CLIPTextModel,
                  tokenizer: CLIPTokenizer,
                  noise_scheduler: DDIMScheduler):
         super().__init__()
@@ -165,7 +165,7 @@ class StableDiffusionModel(pl.LightningModule):
         else:
             tokenizer = CLIPTokenizer.from_pretrained(config.tokenizer)
 
-        text_encoder.stop_at_layer = config.clip_stop_at_layer
+        hook_forward(text_encoder, -config.clip_stop_at_layer)
         noise_scheduler = DDIMScheduler.from_pretrained(config.model, subfolder="scheduler")
 
         return cls(config, unet, vae, text_encoder, tokenizer, noise_scheduler)

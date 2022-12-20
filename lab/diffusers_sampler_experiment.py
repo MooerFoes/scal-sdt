@@ -9,12 +9,12 @@ from diffusers import UNet2DConditionModel, AutoencoderKL
 from diffusers.pipelines import StableDiffusionPipeline
 from omegaconf import OmegaConf
 from torchvision import transforms
-from transformers import CLIPTokenizer
+from transformers import CLIPTokenizer, CLIPTextModel
+
+from modules.clip import hook_forward
 
 parent = str(Path(__file__).parent.parent.absolute())
 sys.path.append(parent)
-
-from modules.clip import CLIPWithSkip
 
 logger = logging.getLogger("exp")
 logging.basicConfig(level="INFO")
@@ -85,11 +85,11 @@ def main(config):
         subfolder="vae",
     )
 
-    text_encoder: CLIPWithSkip = CLIPWithSkip.from_pretrained(
+    text_encoder: CLIPTextModel = CLIPTextModel.from_pretrained(
         config.model,
         subfolder="text_encoder",
     )
-    text_encoder.stop_at_layer = 1
+    hook_forward(text_encoder, -2)
 
     tokenizer: CLIPTokenizer = CLIPTokenizer.from_pretrained(
         config.tokenizer if config.tokenizer else config.model,

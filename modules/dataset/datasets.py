@@ -118,7 +118,7 @@ class ImagePromptDataset(Dataset[Item]):
         image = transforms.Normalize([0.5], [0.5])(image)
         return image
 
-    # def do_cache(self, vae: AutoencoderKL, text_encoder: CLIPWithSkip = None):
+    # def do_cache(self, vae: AutoencoderKL, text_encoder: CLIPTextModel = None):
     #     train_dataloader = torch.utils.data.DataLoader(
     #         self, shuffle=True, collate_fn=lambda x: x, pin_memory=True
     #     )
@@ -214,7 +214,7 @@ class DBDataset(Dataset[tuple[Item, Item]]):
         class_ = self.class_set[index[1]]
         return instance, class_
 
-    # def do_cache(self, vae: AutoencoderKL, text_encoder: CLIPWithSkip = None):
+    # def do_cache(self, vae: AutoencoderKL, text_encoder: CLIPTextModel = None):
     #     train_dataloader = torch.utils.data.DataLoader(
     #         self, shuffle=True, collate_fn=lambda x: x, pin_memory=True
     #     )

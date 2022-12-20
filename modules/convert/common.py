@@ -14,6 +14,7 @@ DTYPE_CHOICES = click.Choice(list(DTYPE_MAP.keys()))
 
 STATE_DICT = dict[str, torch.Tensor]
 
+
 def load_state_dict(file: Path | IO[bytes], map_location="cpu") -> STATE_DICT:
     def load_io(io: IO[bytes]):
         return torch.load(io, map_location=map_location)
