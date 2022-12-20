@@ -59,6 +59,10 @@ aspect_ratio_bucket:
 #    dim_range: [256, 1024]
 #    divisor: 64
 
+ema:
+  enabled: false
+  decay: 0.995
+
 loggers: { }
 
 optimizer:

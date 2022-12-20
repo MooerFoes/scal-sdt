@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import IO
+from typing import IO, Any
 
 import click
 import torch
@@ -12,7 +12,7 @@ DTYPE_MAP = {
 
 DTYPE_CHOICES = click.Choice(list(DTYPE_MAP.keys()))
 
-STATE_DICT = dict[str, torch.Tensor]
+STATE_DICT = dict[str, Any]
 
 
 def load_state_dict(file: Path | IO[bytes], map_location="cpu") -> STATE_DICT:

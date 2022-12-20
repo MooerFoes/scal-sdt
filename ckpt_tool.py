@@ -52,6 +52,9 @@ def infer_format_from_path(path: Path):
               type=click.Choice(["pt", "safetensors"]),
               default=None,
               help='Save in which format. If not specified, infered from output path extension.')
+@click.option("--ema",
+              is_flag=True,
+              help="Use EMA weights.")
 def main(checkpoint: IO[bytes],
          output: Path,
          text_encoder: bool,
@@ -61,7 +64,8 @@ def main(checkpoint: IO[bytes],
          text_encoder_dtype: str,
          overwrite: bool,
          map_location: str,
-         format: Optional[str]):
+         format: Optional[str],
+         ema: bool):
     """Prune a SCAL-SDT checkpoint.
 
     CHECKPOINT: Path to the SCAL-SDT checkpoint.
@@ -77,8 +81,12 @@ def main(checkpoint: IO[bytes],
 
     state_dict = load_state_dict(checkpoint, map_location)
 
-    unet_dict = {k: v.to(DTYPE_MAP[unet_dtype])
-                 for k, v in state_dict.items() if k.startswith("model.diffusion_model.")}
+    if not ema:
+        unet_dict = {k: v.to(DTYPE_MAP[unet_dtype])
+                     for k, v in state_dict.items() if k.startswith("model.diffusion_model.")}
+    else:
+        unet_dict = {k: v.to(DTYPE_MAP[unet_dtype])
+                     for k, v in state_dict["unet_ema"]["state_dict"].items()}
 
     vae_dict = {}
     if vae is not None:

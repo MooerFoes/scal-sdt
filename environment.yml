@@ -28,3 +28,4 @@ dependencies:
   - wandb
   - pip:
       - bitsandbytes~=0.35
+      - torch-ema==0.3

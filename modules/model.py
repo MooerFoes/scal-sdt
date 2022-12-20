@@ -12,6 +12,7 @@ import torch.utils.checkpoint
 import torch.utils.data
 from diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel, StableDiffusionPipeline
 from omegaconf import DictConfig, OmegaConf
+from torch_ema import ExponentialMovingAverage
 from transformers import CLIPTokenizer, CLIPTextModel
 
 from modules.clip import hook_forward
@@ -114,6 +115,8 @@ def get_ldm_config(link_or_path: str):
 
 
 class StableDiffusionModel(pl.LightningModule):
+    unet_ema: Optional[ExponentialMovingAverage]
+
     def __init__(self,
                  config: DictConfig,
                  unet: UNet2DConditionModel,
@@ -122,16 +125,10 @@ class StableDiffusionModel(pl.LightningModule):
                  tokenizer: CLIPTokenizer,
                  noise_scheduler: DDIMScheduler):
         super().__init__()
-        self.noise_scheduler = noise_scheduler
-        self.config = config
-        self.unet = unet
-        self.vae = vae
-        self.text_encoder = text_encoder
-        self.tokenizer = tokenizer
 
-        self.vae.requires_grad_(False)
+        vae.requires_grad_(False)
         if not config.train_text_encoder:
-            self.text_encoder.requires_grad_(False)
+            text_encoder.requires_grad_(False)
             self._text_encode_context_cls = torch.no_grad
         else:
             self._text_encode_context_cls = nullcontext
@@ -142,10 +139,17 @@ class StableDiffusionModel(pl.LightningModule):
                 text_encoder.gradient_checkpointing_enable()
 
         if config.xformers:
-            self.unet.set_use_memory_efficient_attention_xformers(True)
+            unet.set_use_memory_efficient_attention_xformers(True)
 
         self.pipeline = StableDiffusionPipeline(vae, text_encoder, tokenizer, unet, noise_scheduler)
         self.pipeline.set_progress_bar_config(disable=True)
+
+        self.config = config
+        self.unet = unet
+        self.vae = vae
+        self.text_encoder = text_encoder
+        self.tokenizer = tokenizer
+        self.noise_scheduler = noise_scheduler
 
         self.save_hyperparameters(config)
 
@@ -291,8 +295,20 @@ class StableDiffusionModel(pl.LightningModule):
         }
 
     def on_save_checkpoint(self, checkpoint: dict[str, Any]):
-        """SSDT Diffusers -> LDM"""
+        """Diffusers -> SSDT LDM"""
         state_dict = checkpoint["state_dict"]
+
+        # EMA (Cannot be directly loaded by LDM)
+        ema_dict = {}
+        if self.unet_ema is not None:
+            with self.unet_ema.average_parameters():
+                ema_dict = {
+                    "unet_ema": {
+                        "decay": self.unet_ema.decay,
+                        "num_updates": self.unet_ema.num_updates,
+                        "state_dict": self.unet.state_dict()
+                    }
+                }
 
         from modules.convert.diffusers_to_sd import convert_unet_state_dict
 
@@ -306,11 +322,18 @@ class StableDiffusionModel(pl.LightningModule):
             text_encoder_dict = state_dict["text_encoder"]
             text_encoder_dict = {"cond_stage_model.transformer." + k: v for k, v in text_encoder_dict.items()}
 
-        checkpoint["state_dict"] = {**unet_dict, **text_encoder_dict}
+        checkpoint["state_dict"] = {**unet_dict, **text_encoder_dict, **ema_dict}
 
     def on_load_checkpoint(self, checkpoint: dict[str, Any]):
-        """LDM -> SSDT Diffusers"""
+        """SSDT LDM -> Diffusers"""
         state_dict = checkpoint["state_dict"]
+
+        if self.should_update_ema:
+            ema_dict = state_dict["ema_dict"]
+            self.unet.load_state_dict(ema_dict["state_dict"])
+
+            self.unet_ema = ExponentialMovingAverage(self.unet.parameters(), ema_dict["decay"])
+            self.unet_ema.num_updates = ema_dict["num_updates"]
 
         from modules.convert.sd_to_diffusers import convert_ldm_unet_checkpoint
 
@@ -323,6 +346,22 @@ class StableDiffusionModel(pl.LightningModule):
             "unet": unet_dict,
             "text_encoder": text_encoder_dict
         }
+
+    @property
+    def should_update_ema(self):
+        return self.config.ema.enabled and self.trainer.is_global_zero
+
+    def on_fit_start(self):
+        if self.should_update_ema:
+            # Stored on RAM
+            self.unet_ema = ExponentialMovingAverage(self.unet.parameters(), self.config.ema.decay)
+
+    def on_train_batch_end(self, outputs, batch: Any, batch_idx: int):
+        # After optimizer step
+        if self.should_update_ema:
+            self.unet_ema.to(self.unet.device)
+            self.unet_ema.update()
+            self.unet_ema.to("cpu")
 
     def optimizer_zero_grad(self, epoch, batch_idx, optimizer, optimizer_idx):
         optimizer.zero_grad(set_to_none=True)
