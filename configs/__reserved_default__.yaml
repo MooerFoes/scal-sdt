@@ -1,4 +1,5 @@
 model: ???
+ldm_config: 'https://github.com/CompVis/stable-diffusion/raw/main/configs/stable-diffusion/v1-inference.yaml'
 vae: null
 tokenizer: null
 

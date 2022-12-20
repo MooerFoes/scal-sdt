@@ -9,7 +9,7 @@ from omegaconf import OmegaConf, DictConfig
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from modules.args import parser
-from modules.model import load_model
+from modules.model import StableDiffusionModel
 from modules.sample_callback import SampleCallback
 
 logger = logging.getLogger()
@@ -104,7 +104,7 @@ def main(args: Namespace, config: DictConfig):
     if config.seed is not None:
         pl.seed_everything(config.seed)
 
-    model = load_model(config)
+    model = StableDiffusionModel.from_config(config)
 
     # TODO
     # if not ("augment" in config.data and any(config.data.augment)):

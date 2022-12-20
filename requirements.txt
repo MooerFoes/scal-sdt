@@ -9,4 +9,5 @@ click~=8.1
 ftfy~=6.1
 accelerate~=0.14
 psutil~=5.9
+requests~=2.28
 git+https://github.com/CCRcmcpe/diffusers.git

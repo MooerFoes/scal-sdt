@@ -3,7 +3,7 @@ import logging
 import math
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import pytorch_lightning as pl
 import torch
@@ -11,6 +11,7 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 import torch.utils.data
 from diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel, StableDiffusionPipeline
+from omegaconf import DictConfig, OmegaConf
 from transformers import CLIPTokenizer
 
 from modules.clip import CLIPWithSkip
@@ -59,7 +60,7 @@ def get_lr_scheduler(config, optimizer) -> Any:
     return scheduler
 
 
-def load_df_pipeline(path, vae=None, tokenizer=None, clip_stop_at_layer=1):
+def load_df_pipeline(path: str, vae: Optional[str] = None):
     unet = UNet2DConditionModel.from_pretrained(path, subfolder="unet")
 
     if vae is None:
@@ -68,37 +69,53 @@ def load_df_pipeline(path, vae=None, tokenizer=None, clip_stop_at_layer=1):
         vae = AutoencoderKL.from_pretrained(vae)
 
     text_encoder = CLIPWithSkip.from_pretrained(path, subfolder="text_encoder")
-    text_encoder.stop_at_layer = clip_stop_at_layer
 
-    if tokenizer is None:
-        tokenizer = CLIPTokenizer.from_pretrained(path, subfolder="tokenizer")
+    return unet, vae, text_encoder
+
+
+def load_ldm_checkpoint(path: Path, config: DictConfig, vae_path: Optional[Path] = None):
+    ckpt = torch.load(path)
+    state_dict = ckpt.get("state_dict", ckpt)
+
+    from modules.convert.sd_to_diffusers import (
+        create_unet_diffusers_config,
+        convert_ldm_unet_checkpoint,
+        create_vae_diffusers_config,
+        convert_ldm_vae_checkpoint,
+        convert_ldm_clip_checkpoint
+    )
+
+    unet_config = create_unet_diffusers_config(config)
+    unet_state_dict = convert_ldm_unet_checkpoint(state_dict, unet_config)
+    unet = UNet2DConditionModel(**unet_config)
+    unet.load_state_dict(unet_state_dict)
+
+    vae_config = create_vae_diffusers_config(config)
+    converted_vae_checkpoint = convert_ldm_vae_checkpoint(state_dict, vae_config, vae_path)
+    vae = AutoencoderKL(**vae_config)
+    vae.load_state_dict(converted_vae_checkpoint)
+
+    text_encoder = convert_ldm_clip_checkpoint(state_dict)
+
+    return unet, vae, text_encoder
+
+
+def get_ldm_config(link_or_path: str):
+    if link_or_path.startswith("http://") or link_or_path.startswith("https://"):
+        import requests
+        config_str = requests.get(link_or_path).content
+    elif Path(link_or_path).exists():
+        with open(link_or_path, "r") as f:
+            config_str = f.read()
     else:
-        tokenizer = CLIPTokenizer.from_pretrained(tokenizer)
+        raise ValueError(f'"{link_or_path}" is not a valid link or path')
 
-    return unet, vae, text_encoder, tokenizer
-
-
-def load_model(config):
-    model_path = Path(config.model)
-
-    if (model_path / "model_index.json").is_file():
-        unet, vae, text_encoder, tokenizer = \
-            load_df_pipeline(model_path, config.vae, config.tokenizer, config.clip_stop_at_layer)
-    elif model_path.suffix.lower() == ".ckpt":
-        raise NotImplementedError("Loading directly from SD checkpoint is not implemented.")
-    else:
-        raise ValueError("Invalid model. (Not Diffusers format nor SD format)")
-
-    logger.info("Model loaded")
-
-    noise_scheduler = DDIMScheduler.from_config(config.model, subfolder="scheduler")
-
-    return StableDiffusionModel(config, unet, vae, text_encoder, tokenizer, noise_scheduler)
+    return OmegaConf.create(config_str)
 
 
 class StableDiffusionModel(pl.LightningModule):
     def __init__(self,
-                 config,
+                 config: DictConfig,
                  unet: UNet2DConditionModel,
                  vae: AutoencoderKL,
                  text_encoder: CLIPWithSkip,
@@ -131,6 +148,27 @@ class StableDiffusionModel(pl.LightningModule):
         self.pipeline.set_progress_bar_config(disable=True)
 
         self.save_hyperparameters(config)
+
+    @classmethod
+    def from_config(cls, config: DictConfig):
+        if (model_path := Path(config.model)).suffix.lower() == ".ckpt":
+            unet, vae, text_encoder = \
+                load_ldm_checkpoint(model_path, get_ldm_config(config.ldm_config), Path(config.vae))
+        else:
+            unet, vae, text_encoder = \
+                load_df_pipeline(config.model, config.vae)
+
+        logger.info("Weights loaded")
+
+        if config.tokenizer is None:
+            tokenizer = CLIPTokenizer.from_pretrained(config.model, subfolder="tokenizer")
+        else:
+            tokenizer = CLIPTokenizer.from_pretrained(config.tokenizer)
+
+        text_encoder.stop_at_layer = config.clip_stop_at_layer
+        noise_scheduler = DDIMScheduler.from_pretrained(config.model, subfolder="scheduler")
+
+        return cls(config, unet, vae, text_encoder, tokenizer, noise_scheduler)
 
     @torch.no_grad()
     def _vae_encode(self, image):
@@ -253,7 +291,7 @@ class StableDiffusionModel(pl.LightningModule):
         }
 
     def on_save_checkpoint(self, checkpoint: dict[str, Any]):
-        """Diffusers -> LDM"""
+        """SSDT Diffusers -> LDM"""
         state_dict = checkpoint["state_dict"]
 
         from modules.convert.diffusers_to_sd import convert_unet_state_dict
@@ -263,7 +301,7 @@ class StableDiffusionModel(pl.LightningModule):
         unet_dict = {"model.diffusion_model." + k: v for k, v in unet_dict.items()}
 
         text_encoder_dict = {}
-        # Save text encoder state only if it was unfreezed.
+        # Save text encoder state only if it was unfreezed
         if self.config.train_text_encoder:
             text_encoder_dict = state_dict["text_encoder"]
             text_encoder_dict = {"cond_stage_model.transformer." + k: v for k, v in text_encoder_dict.items()}
@@ -271,17 +309,15 @@ class StableDiffusionModel(pl.LightningModule):
         checkpoint["state_dict"] = {**unet_dict, **text_encoder_dict}
 
     def on_load_checkpoint(self, checkpoint: dict[str, Any]):
-        """LDM -> Diffusers"""
-        TEXT_ENCODER_PREFIX = "cond_stage_model.transformer."
-
+        """LDM -> SSDT Diffusers"""
         state_dict = checkpoint["state_dict"]
 
         from modules.convert.sd_to_diffusers import convert_ldm_unet_checkpoint
 
         unet_dict = convert_ldm_unet_checkpoint(state_dict, self.unet.config, extract_ema=False)
 
-        text_encoder_dict = {k.removeprefix(TEXT_ENCODER_PREFIX): v
-                             for k, v in state_dict.items() if k.startswith(TEXT_ENCODER_PREFIX)}
+        text_encoder_dict = {k.removeprefix("cond_stage_model.transformer."): v
+                             for k, v in state_dict.items() if k.startswith("cond_stage_model.transformer.")}
 
         checkpoint["state_dict"] = {
             "unet": unet_dict,
