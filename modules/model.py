@@ -203,7 +203,7 @@ class StableDiffusionModel(pl.LightningModule):
 
         match uc_conf.cond:
             case "zeros":
-                return torch.zeros(bsz, length, encoder_config.projection_dim, device="cuda")
+                return torch.zeros(bsz, length, encoder_config.hidden_size, device="cuda")
             case "bos":
                 fill_token_id = encoder_config.bos_token_id
             case "eos":
