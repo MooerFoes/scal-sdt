@@ -1,71 +1,63 @@
-from urllib.request import urlopen
+from pathlib import Path
 
 import click
-import torch
-from diffusers import UNet2DConditionModel, AutoencoderKL, StableDiffusionPipeline
-from omegaconf import OmegaConf
-from transformers import CLIPTokenizer, CLIPTextModel
+from diffusers import StableDiffusionPipeline
+from transformers import CLIPTokenizer
 
-from modules.convert.common import get_module_state_dict, DTYPE_CHOICES
-from modules.convert.sd_to_diffusers import create_unet_diffusers_config, create_vae_diffusers_config, \
-    create_diffusers_scheduler
+from modules.convert.common import DTYPE_CHOICES, DTYPE_MAP
+from modules.convert.sd_to_diffusers import create_diffusers_scheduler
+from modules.model import get_ldm_config, load_ldm_checkpoint
 
-V1_INFERENCE = 'https://raw.githubusercontent.com/CompVis/stable-diffusion/main/configs/stable-diffusion/v1-inference.yaml'
-
-
-def get_default_config():
-    with urlopen(V1_INFERENCE) as f:
-        content = f.read().decode()
-
-    return OmegaConf.create(content)
+DEFAULT_CONFIG = 'https://raw.githubusercontent.com/CompVis/stable-diffusion/main/configs/stable-diffusion/v1-inference.yaml'
 
 
 @click.command()
-@click.argument("checkpoint", type=click.File("rb"))
-@click.argument("output", type=click.Path())
-@click.option("--config", type=click.File("r"), help="Path to the LDM config. (Default: v1-inference.yaml)")
+@click.argument("checkpoint", type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.argument("output", type=click.Path(path_type=Path))
+@click.option("--config",
+              type=str,
+              default=DEFAULT_CONFIG,
+              help="Link or path to the LDM config. (Default: v1-inference.yaml)")
 @click.option("--unet-dtype",
               type=DTYPE_CHOICES,
               default="fp32",
               help="Save unet weights in this data type.")
-@click.option("--vae-dtype",
-              type=DTYPE_CHOICES,
-              default="fp32",
-              help="Save VAE weights in this data type. (other than fp32 NOT RECOMMENDED)")
-@click.option("--text-encoder-dtype",
-              type=DTYPE_CHOICES,
-              default="fp32",
-              help="Save text encoder weights in data type.")
-def main(checkpoint, output, config, unet_dtype, vae_dtype, text_encoder_dtype):
-    """Converts SCAL-SDT checkpoint to Diffusers format.
+@click.option("--vae",
+              type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              help="Path to VAE ckpt.")
+# @click.option("--vae-dtype",
+#               type=DTYPE_CHOICES,
+#               default="fp32",
+#               help="Save VAE weights in this data type. (other than fp32 NOT RECOMMENDED)")
+# @click.option("--text-encoder-dtype",
+#               type=DTYPE_CHOICES,
+#               default="fp32",
+#               help="Save text encoder weights in data type.")
+@click.option("--overwrite", is_flag=True)
+def main(checkpoint: Path,
+         output: Path,
+         config: str,
+         unet_dtype: str,
+         vae: Path,
+         # vae_dtype: str,
+         # text_encoder_dtype: str,
+         overwrite: bool):
+    """Converts SCAL-SDT checkpoint to Diffusers saved pipeline.
 
     CHECKPOINT: Path to the SCAL-SDT checkpoint.
     OUTPUT: Diffusers pipeline output path."""
-    if config is None:
-        config = get_default_config()
-    else:
-        config = OmegaConf.load(config)
+    if output.exists() and not overwrite:
+        raise FileExistsError(f'"{output}" already exists')
 
-    state_dict = torch.load(checkpoint)["state_dict"]
+    config = get_ldm_config(config)
 
-    unet_dict = get_module_state_dict(state_dict, "unet", unet_dtype)
-    vae_dict = get_module_state_dict(state_dict, "vae", vae_dtype)
-    text_encoder_dict = get_module_state_dict(state_dict, "text_encoder", text_encoder_dtype)
+    unet, vae, text_encoder = load_ldm_checkpoint(checkpoint, config, vae)
 
-    unet_config = create_unet_diffusers_config(config)
-    vae_config = create_vae_diffusers_config(config)
-
-    unet = UNet2DConditionModel(**unet_config)
-    unet.load_state_dict(unet_dict)
-
-    vae = AutoencoderKL(**vae_config)
-    vae.load_state_dict(vae_dict)
-
-    text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14")
-    text_encoder.load_state_dict(text_encoder_dict)
+    unet.to(DTYPE_MAP[unet_dtype])
+    # vae.to(DTYPE_MAP[vae_dtype])
+    # text_encoder.to(DTYPE_MAP[text_encoder_dtype])
 
     scheduler = create_diffusers_scheduler(config)
-
     tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
 
     pipeline = StableDiffusionPipeline(
