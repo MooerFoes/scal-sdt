@@ -15,6 +15,7 @@ from omegaconf import DictConfig, OmegaConf
 from transformers import CLIPTokenizer
 
 from modules.clip import CLIPWithSkip
+from modules.convert.common import load_state_dict
 from modules.dataset import get_dataset, collate_fn, get_sampler
 from modules.utils import get_class, physical_core_count
 
@@ -74,8 +75,7 @@ def load_df_pipeline(path: str, vae: Optional[str] = None):
 
 
 def load_ldm_checkpoint(path: Path, config: DictConfig, vae_path: Optional[Path] = None):
-    ckpt = torch.load(path)
-    state_dict = ckpt.get("state_dict", ckpt)
+    state_dict = load_state_dict(path)
 
     from modules.convert.sd_to_diffusers import (
         create_unet_diffusers_config,

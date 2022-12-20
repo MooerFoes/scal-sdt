@@ -1,10 +1,12 @@
+import warnings
 from pathlib import Path
+from typing import Optional
 
 import click
 import torch
+from typing.io import IO
 
-from modules.convert.common import DTYPE_CHOICES, STATE_DICT, get_module_state_dict
-from modules.convert.diffusers_to_sd import convert_unet_state_dict, convert_vae_state_dict
+from modules.convert.common import DTYPE_CHOICES, load_state_dict, DTYPE_MAP
 
 
 def infer_format_from_path(path: Path):
@@ -20,9 +22,13 @@ def infer_format_from_path(path: Path):
 
 @click.command()
 @click.argument("checkpoint", type=click.File("rb"))
-@click.argument("output", type=click.Path())
-@click.option("--text-encoder/--no-text-encoder", default=True, help="Whether to include text encoder weights.")
-@click.option("--vae/--no-vae", default=True, help="Whether to include VAE weights.")
+@click.argument("output", type=click.Path(path_type=Path))
+@click.option("--text-encoder",
+              is_flag=True,
+              help="Whether to include text encoder weights.")
+@click.option("--vae",
+              type=click.File("rb"),
+              help="Path to VAE ckpt.")
 @click.option("--unet-dtype",
               type=DTYPE_CHOICES,
               default="fp32",
@@ -35,23 +41,31 @@ def infer_format_from_path(path: Path):
               type=DTYPE_CHOICES,
               default="fp32",
               help="Save text encoder weights in data type.")
-@click.option("--overwrite", is_flag=True)
-@click.option("--map-location", type=str, default="cpu",
+@click.option("--overwrite",
+              is_flag=True,
+              help="Whether to overwrite output")
+@click.option("--map-location",
+              type=str,
+              default="cpu",
               help='Where the checkpoint is loaded to. Could be "cpu" or "cuda".')
 @click.option("--format",
               type=click.Choice(["pt", "safetensors"]),
               default=None,
               help='Save in which format. If not specified, infered from output path extension.')
-def main(checkpoint, output,
-         text_encoder, vae,
-         unet_dtype, vae_dtype, text_encoder_dtype,
-         overwrite, map_location, format):
-    """Converts SCAL-SDT checkpoint to Stable Diffusion format.
+def main(checkpoint: IO[bytes],
+         output: Path,
+         text_encoder: bool,
+         vae: Optional[IO[bytes]],
+         unet_dtype: str,
+         vae_dtype: str,
+         text_encoder_dtype: str,
+         overwrite: bool,
+         map_location: str,
+         format: Optional[str]):
+    """Prune a SCAL-SDT checkpoint.
 
     CHECKPOINT: Path to the SCAL-SDT checkpoint.
-    OUTPUT: Output Stable Diffusion checkpoint path."""
-    output = Path(output)
-
+    OUTPUT: Output path."""
     if output.exists() and not overwrite:
         raise FileExistsError(f"{output} already exists")
 
@@ -61,25 +75,23 @@ def main(checkpoint, output,
 
         format = infered_format
 
-    state_dict: STATE_DICT = torch.load(checkpoint, map_location=map_location)["state_dict"]
+    state_dict = load_state_dict(checkpoint, map_location)
 
-    # Convert the UNet model
-    unet_dict = get_module_state_dict(state_dict, "unet", unet_dtype)
-    unet_dict = convert_unet_state_dict(unet_dict)
-    unet_dict = {"model.diffusion_model." + k: v for k, v in unet_dict.items()}
+    unet_dict = {k: v.to(DTYPE_MAP[unet_dtype])
+                 for k, v in state_dict.items() if k.startswith("model.diffusion_model.")}
 
     vae_dict = {}
-    if vae:
-        # Convert the VAE model
-        vae_dict = get_module_state_dict(state_dict, "vae", vae_dtype)
-        vae_dict = convert_vae_state_dict(vae_dict)
-        vae_dict = {"first_stage_model." + k: v for k, v in vae_dict.items()}
+    if vae is not None:
+        vae_dict = load_state_dict(vae, map_location)
+        vae_dict = {k: v.to(DTYPE_MAP[vae_dtype])
+                    for k, v in vae_dict.items() if k.startswith("first_stage_model.")}
 
     text_encoder_dict = {}
     if text_encoder:
-        # Convert the text encoder model
-        text_encoder_dict = get_module_state_dict(state_dict, "text_encoder", text_encoder_dtype)
-        text_encoder_dict = {"cond_stage_model.transformer." + k: v for k, v in text_encoder_dict.items()}
+        text_encoder_dict = {k: v.to(DTYPE_MAP[text_encoder_dtype])
+                             for k, v in state_dict.items() if k.startswith("cond_stage_model.transformer.")}
+        if not any(text_encoder_dict.items()):
+            warnings.warn("No text encoder weights were found in the checkpoint.")
 
     # Put together new checkpoint
     state_dict = {**unet_dict, **vae_dict, **text_encoder_dict}
@@ -91,12 +103,12 @@ def main(checkpoint, output,
         try:
             from safetensors.torch import save_file
         except ImportError:
-            raise 'In order to use safetensors, run "pip install safetensors"'
+            raise ModuleNotFoundError('In order to use safetensors, run "pip install safetensors"')
 
         state_dict = {k: v.contiguous().to_dense() for k, v in state_dict.items()}
         save_file(state_dict, output)
     else:
-        raise 'Invalid format'
+        raise ValueError(f'Invalid format "{format}"')
 
 
 if __name__ == '__main__':

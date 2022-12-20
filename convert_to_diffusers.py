@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Optional
 
 import click
 from diffusers import StableDiffusionPipeline
@@ -38,7 +39,7 @@ def main(checkpoint: Path,
          output: Path,
          config: str,
          unet_dtype: str,
-         vae: Path,
+         vae: Optional[Path],
          # vae_dtype: str,
          # text_encoder_dtype: str,
          overwrite: bool):
