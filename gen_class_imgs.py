@@ -12,7 +12,7 @@ from tqdm import tqdm
 from modules.dataset import Size
 from modules.dataset.bucket import BucketManager
 from modules.dataset.samplers import get_id_size_map, get_gen_bucket_params
-from modules.model import load_df_pipeline
+from modules.model import StableDiffusionModel
 from modules.utils import list_images
 
 logger = logging.getLogger("cls-gen")
@@ -85,23 +85,7 @@ def main(config):
         logger.warning("Prior preservation not enabled. Class image generation is not needed.")
         return
 
-    unet, vae, text_encoder, tokenizer = load_df_pipeline(Path(config.model), config.vae, config.tokenizer)
-
-    unet.half()
-    unet.set_use_memory_efficient_attention_xformers(True)
-
-    from diffusers.schedulers.scheduling_ddim import DDIMScheduler
-    scheduler = DDIMScheduler.from_config(config.model, subfolder="scheduler")
-
-    pipeline = StableDiffusionPipeline(
-        unet=unet,
-        vae=vae,
-        text_encoder=text_encoder,
-        tokenizer=tokenizer,
-        scheduler=scheduler
-    )
-    pipeline.set_progress_bar_config(disable=True)
-    pipeline.to("cuda")
+    pipeline = StableDiffusionModel.from_config(config).pipeline
 
     arb_config = config.aspect_ratio_bucket
 
