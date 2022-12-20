@@ -252,11 +252,41 @@ class StableDiffusionModel(pl.LightningModule):
             }
         }
 
-    def on_load_checkpoint(self, checkpoint: dict[str, Any]):
-        super().on_load_checkpoint(checkpoint)
-
     def on_save_checkpoint(self, checkpoint: dict[str, Any]):
-        super().on_save_checkpoint(checkpoint)
+        """Diffusers -> LDM"""
+        state_dict = checkpoint["state_dict"]
+
+        from modules.convert.diffusers_to_sd import convert_unet_state_dict
+
+        unet_dict = state_dict["unet"]
+        unet_dict = convert_unet_state_dict(unet_dict)
+        unet_dict = {"model.diffusion_model." + k: v for k, v in unet_dict.items()}
+
+        text_encoder_dict = {}
+        # Save text encoder state only if it was unfreezed.
+        if self.config.train_text_encoder:
+            text_encoder_dict = state_dict["text_encoder"]
+            text_encoder_dict = {"cond_stage_model.transformer." + k: v for k, v in text_encoder_dict.items()}
+
+        checkpoint["state_dict"] = {**unet_dict, **text_encoder_dict}
+
+    def on_load_checkpoint(self, checkpoint: dict[str, Any]):
+        """LDM -> Diffusers"""
+        TEXT_ENCODER_PREFIX = "cond_stage_model.transformer."
+
+        state_dict = checkpoint["state_dict"]
+
+        from modules.convert.sd_to_diffusers import convert_ldm_unet_checkpoint
+
+        unet_dict = convert_ldm_unet_checkpoint(state_dict, self.unet.config, extract_ema=False)
+
+        text_encoder_dict = {k.removeprefix(TEXT_ENCODER_PREFIX): v
+                             for k, v in state_dict.items() if k.startswith(TEXT_ENCODER_PREFIX)}
+
+        checkpoint["state_dict"] = {
+            "unet": unet_dict,
+            "text_encoder": text_encoder_dict
+        }
 
     def optimizer_zero_grad(self, epoch, batch_idx, optimizer, optimizer_idx):
         optimizer.zero_grad(set_to_none=True)
