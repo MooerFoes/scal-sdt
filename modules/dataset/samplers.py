@@ -109,6 +109,7 @@ class AspectSampler(Sampler):
         self.bucket_manager = bucket_manager
         self._image_paths = data_source.image_paths
         self._world_size = world_size
+        self._batch_size = batch_size
 
     def __iter__(self):
         for batch, size in self.bucket_manager.generator():
@@ -118,7 +119,7 @@ class AspectSampler(Sampler):
         if self.bucket_manager.epoch_empty:
             self.bucket_manager.start_epoch()
 
-        return self.bucket_manager.batch_total
+        return self.bucket_manager.batch_total * self._batch_size
 
 
 class AspectSamplerDB(Sampler):
@@ -144,6 +145,7 @@ class AspectSamplerDB(Sampler):
         self.bucket_manager = bucket_manager
         self._image_paths = data_source.instance_set.image_paths
         self._world_size = world_size
+        self._batch_size = batch_size
 
         class_bucket_manager = BucketManager[int](1, seed, world_size, global_rank, False)
         class_bucket_manager.buckets = instance_buckets
@@ -175,7 +177,7 @@ class AspectSamplerDB(Sampler):
         if self.bucket_manager.epoch_empty:
             self.bucket_manager.start_epoch()
 
-        return self.bucket_manager.batch_total
+        return self.bucket_manager.batch_total * self._batch_size
 
     def _get_closest_class_entries_to_size(self, size):
         target_aspect = size[0] / size[1]
