@@ -86,6 +86,8 @@ def main(config):
         return
 
     pipeline = StableDiffusionModel.from_config(config).pipeline
+    pipeline.unet.to(torch.float16)
+    pipeline.to("cuda")
 
     arb_config = config.aspect_ratio_bucket
 

@@ -40,5 +40,6 @@ def hook_forward(clip: CLIPTextModel, stop_at_layer: int):
             attentions=result.attentions,
         )
 
-    clip.forward = forward
+    import types
+    clip.forward = types.MethodType(forward, clip)
     return clip

@@ -15,7 +15,6 @@ dependencies:
   - pytorch-cuda=11.6
   - pillow
   - transformers
-  - diffusers
   - omegaconf
   - pytorch-lightning
   - numpy
@@ -29,3 +28,4 @@ dependencies:
   - pip:
       - bitsandbytes~=0.35
       - torch-ema==0.3
+      - git+https://github.com/CCRcmcpe/diffusers.git

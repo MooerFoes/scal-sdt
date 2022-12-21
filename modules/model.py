@@ -141,7 +141,7 @@ class StableDiffusionModel(pl.LightningModule):
         if config.xformers:
             unet.set_use_memory_efficient_attention_xformers(True)
 
-        self.pipeline = StableDiffusionPipeline(vae, text_encoder, tokenizer, unet, noise_scheduler)
+        self.pipeline = StableDiffusionPipeline(vae, text_encoder, tokenizer, unet, noise_scheduler, None, None, False)
         self.pipeline.set_progress_bar_config(disable=True)
 
         self.config = config
@@ -301,7 +301,7 @@ class StableDiffusionModel(pl.LightningModule):
         # EMA (Cannot be directly loaded by LDM)
         ema_dict = {}
         if self.unet_ema is not None:
-            with self.unet_ema.average_parameters():
+            with self.unet_ema.average_parameters(), torch.no_grad():
                 ema_dict = {
                     "unet_ema": {
                         "decay": self.unet_ema.decay,
@@ -309,31 +309,31 @@ class StableDiffusionModel(pl.LightningModule):
                         "state_dict": self.unet.state_dict()
                     }
                 }
+            self.unet_ema.collected_params = None
 
         from modules.convert.diffusers_to_sd import convert_unet_state_dict
 
-        unet_dict = state_dict["unet"]
+        unet_dict = {k.removeprefix("unet."): v for k, v in state_dict.items() if k.startswith("unet.")}
         unet_dict = convert_unet_state_dict(unet_dict)
         unet_dict = {"model.diffusion_model." + k: v for k, v in unet_dict.items()}
 
         text_encoder_dict = {}
         # Save text encoder state only if it was unfreezed
         if self.config.train_text_encoder:
-            text_encoder_dict = state_dict["text_encoder"]
-            text_encoder_dict = {"cond_stage_model.transformer." + k: v for k, v in text_encoder_dict.items()}
+            text_encoder_dict = {"cond_stage_model.transformer." + k.removeprefix("text_encoder."): v
+                                 for k, v in state_dict.items() if k.startswith("text_encoder.")}
 
-        checkpoint["state_dict"] = {**unet_dict, **text_encoder_dict, **ema_dict}
+        checkpoint["state_dict"] = {
+            **unet_dict,
+            **ema_dict,
+            **text_encoder_dict
+        }
 
     def on_load_checkpoint(self, checkpoint: dict[str, Any]):
         """SSDT LDM -> Diffusers"""
         state_dict = checkpoint["state_dict"]
 
-        if self.should_update_ema:
-            ema_dict = state_dict["ema_dict"]
-            self.unet.load_state_dict(ema_dict["state_dict"])
-
-            self.unet_ema = ExponentialMovingAverage(self.unet.parameters(), ema_dict["decay"])
-            self.unet_ema.num_updates = ema_dict["num_updates"]
+        ema_dict = state_dict["unet_ema"]
 
         from modules.convert.sd_to_diffusers import convert_ldm_unet_checkpoint
 
@@ -344,8 +344,22 @@ class StableDiffusionModel(pl.LightningModule):
 
         checkpoint["state_dict"] = {
             "unet": unet_dict,
+            "unet_ema": ema_dict,
             "text_encoder": text_encoder_dict
         }
+
+    def load_state_dict(self, state_dict: dict[str, Any], strict: bool = True):
+        if self.should_update_ema:
+            ema_dict = state_dict["unet_ema"]
+            self.unet.load_state_dict(ema_dict["state_dict"])
+
+            self.unet_ema = ExponentialMovingAverage(self.unet.parameters(), ema_dict["decay"])
+            self.unet_ema.num_updates = ema_dict["num_updates"]
+
+        self.unet.load_state_dict(state_dict["unet"])
+
+        if self.config.train_text_encoder:
+            self.text_encoder.load_state_dict(state_dict["text_encoder"])
 
     @property
     def should_update_ema(self):
