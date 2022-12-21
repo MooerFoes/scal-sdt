@@ -203,7 +203,7 @@ class StableDiffusionModel(pl.LightningModule):
 
         match uc_conf.cond:
             case "zeros":
-                return torch.zeros(bsz, length, encoder_config.hidden_size, device="cuda")
+                return torch.zeros(bsz, length, encoder_config.hidden_size, device=self.unet.device)
             case "bos":
                 fill_token_id = encoder_config.bos_token_id
             case "eos":
@@ -211,7 +211,7 @@ class StableDiffusionModel(pl.LightningModule):
             case _:
                 raise Exception("Invalid uncond.cond")
 
-        token_ids = torch.full((bsz, length), fill_token_id, device="cuda")
+        token_ids = torch.full((bsz, length), fill_token_id, device=self.unet.device)
 
         return self.text_encoder.forward(token_ids).last_hidden_state
 
