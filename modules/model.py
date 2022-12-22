@@ -104,7 +104,8 @@ def load_ldm_checkpoint(path: Path, config: DictConfig, vae_path: Optional[Path]
 def get_ldm_config(link_or_path: str):
     if link_or_path.startswith("http://") or link_or_path.startswith("https://"):
         import requests
-        config_str = requests.get(link_or_path).content
+        with requests.Session() as session:
+            config_str = session.get(link_or_path).content.decode("utf-8")
     elif Path(link_or_path).exists():
         with open(link_or_path, "r") as f:
             config_str = f.read()

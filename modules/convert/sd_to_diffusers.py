@@ -1,10 +1,10 @@
-import torch
-
 from diffusers import (
     DDIMScheduler,
 )
 from diffusers.pipelines.latent_diffusion.pipeline_latent_diffusion import LDMBertConfig, LDMBertModel
 from transformers import CLIPTextModel
+
+from modules.convert.common import load_state_dict
 
 
 def shave_segments(path, n_shave_prefix_segments=1):
@@ -423,7 +423,7 @@ def convert_ldm_unet_checkpoint(checkpoint, config, extract_ema=False):
 
 def convert_ldm_vae_checkpoint(checkpoint, config, vae_path=None):
     if vae_path is not None:
-        vae_state_dict = torch.load(vae_path)['state_dict']
+        vae_state_dict = load_state_dict(vae_path)
     else:
         # extract state dict for VAE
         vae_state_dict = {}
