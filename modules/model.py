@@ -62,7 +62,7 @@ def get_lr_scheduler(config, optimizer) -> Any:
     return scheduler
 
 
-def load_df_pipeline(path: str, vae: Optional[str] = None):
+def load_df_pipeline(path: str, vae: Optional[str] = None, tokenizer: Optional[str] = None):
     unet = UNet2DConditionModel.from_pretrained(path, subfolder="unet")
 
     if vae is None:
@@ -72,10 +72,15 @@ def load_df_pipeline(path: str, vae: Optional[str] = None):
 
     text_encoder = CLIPTextModel.from_pretrained(path, subfolder="text_encoder")
 
-    return unet, vae, text_encoder
+    if tokenizer is None:
+        tokenizer = CLIPTokenizer.from_pretrained(path, subfolder="tokenizer")
+    else:
+        tokenizer = CLIPTokenizer.from_pretrained(tokenizer)
+
+    return unet, vae, text_encoder, tokenizer
 
 
-def load_ldm_checkpoint(path: Path, config: DictConfig, vae_path: Optional[Path] = None):
+def load_ldm_checkpoint(path: Path, config: DictConfig, vae_path: Optional[Path] = None, tokenizer: Optional[str] = None):
     state_dict = load_state_dict(path)
 
     from modules.convert.sd_to_diffusers import (
@@ -98,7 +103,9 @@ def load_ldm_checkpoint(path: Path, config: DictConfig, vae_path: Optional[Path]
 
     text_encoder = convert_ldm_clip_checkpoint(state_dict)
 
-    return unet, vae, text_encoder
+    tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14" if tokenizer is None else tokenizer)
+
+    return unet, vae, text_encoder, tokenizer
 
 
 def get_ldm_config(link_or_path: str):
@@ -157,18 +164,13 @@ class StableDiffusionModel(pl.LightningModule):
     @classmethod
     def from_config(cls, config: DictConfig):
         if (model_path := Path(config.model)).suffix.lower() == ".ckpt":
-            unet, vae, text_encoder = \
-                load_ldm_checkpoint(model_path, get_ldm_config(config.ldm_config), Path(config.vae))
+            unet, vae, text_encoder, tokenizer = \
+                load_ldm_checkpoint(model_path, get_ldm_config(config.ldm_config), Path(config.vae), config.tokenizer)
         else:
-            unet, vae, text_encoder = \
-                load_df_pipeline(config.model, config.vae)
+            unet, vae, text_encoder, tokenizer = \
+                load_df_pipeline(config.model, config.vae, config.tokenizer)
 
         logger.info("Weights loaded")
-
-        if config.tokenizer is None:
-            tokenizer = CLIPTokenizer.from_pretrained(config.model, subfolder="tokenizer")
-        else:
-            tokenizer = CLIPTokenizer.from_pretrained(config.tokenizer)
 
         hook_forward(text_encoder, -config.clip_stop_at_layer)
         noise_scheduler = DDIMScheduler.from_pretrained(config.model, subfolder="scheduler")
