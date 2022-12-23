@@ -158,6 +158,7 @@ class StableDiffusionModel(pl.LightningModule):
         self.text_encoder = text_encoder
         self.tokenizer = tokenizer
         self.noise_scheduler = noise_scheduler
+        self.unet_ema = None
 
         self.save_hyperparameters(config)
 
