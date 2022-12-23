@@ -123,7 +123,7 @@ def get_ldm_config(link_or_path: str):
 
 
 class StableDiffusionModel(pl.LightningModule):
-    unet_ema: Optional[ExponentialMovingAverage]
+    unet_ema: Optional[ExponentialMovingAverage] = None
 
     def __init__(self,
                  config: DictConfig,
@@ -158,7 +158,6 @@ class StableDiffusionModel(pl.LightningModule):
         self.text_encoder = text_encoder
         self.tokenizer = tokenizer
         self.noise_scheduler = noise_scheduler
-        self.unet_ema = None
 
         self.save_hyperparameters(config)
 
