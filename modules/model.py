@@ -123,7 +123,7 @@ def get_ldm_config(link_or_path: str):
 
 
 class StableDiffusionModel(pl.LightningModule):
-    unet_ema: Optional[ExponentialMovingAverage]
+    unet_ema: Optional[ExponentialMovingAverage] = None
 
     def __init__(self,
                  config: DictConfig,
