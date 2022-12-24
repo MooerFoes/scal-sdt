@@ -580,6 +580,10 @@ def convert_ldm_bert_checkpoint(checkpoint, config):
 
 
 def convert_ldm_clip_checkpoint(checkpoint):
+    # Silent the 'Some weights of the model checkpoint at openai/clip-vit-large-patch14 were not used' warning
+    from transformers import logging
+    logging.set_verbosity_error()
+
     text_model = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14")
 
     keys = list(checkpoint.keys())

@@ -1,4 +1,4 @@
-from pathlib import Path
+from os import PathLike
 from typing import IO, Any
 
 import click
@@ -15,14 +15,6 @@ DTYPE_CHOICES = click.Choice(list(DTYPE_MAP.keys()))
 STATE_DICT = dict[str, Any]
 
 
-def load_state_dict(file: Path | IO[bytes], map_location="cpu") -> STATE_DICT:
-    def load_io(io: IO[bytes]):
-        return torch.load(io, map_location=map_location)
-
-    if isinstance(file, Path):
-        with file.open("rb") as f:
-            ckpt = load_io(f)
-    else:
-        ckpt = load_io(file)
-
+def load_state_dict(file: str | PathLike | IO[bytes], map_location="cpu") -> STATE_DICT:
+    ckpt = torch.load(file, map_location=map_location)
     return ckpt.get("state_dict", ckpt)

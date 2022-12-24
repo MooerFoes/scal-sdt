@@ -9,12 +9,9 @@ from pytorch_lightning.utilities import rank_zero_only
 from tqdm import tqdm
 
 from .model import StableDiffusionModel
-from .utils import rename_keys
 
 
 class SampleCallback(pl.Callback):
-    _CONFIG_TRANSFORM = {"cfg_scale": "guidance_scale", "steps": "num_inference_steps"}
-
     def __init__(self, sample_save_dir: str | PathLike):
         self.sample_dir = Path(sample_save_dir)
 
@@ -39,6 +36,7 @@ class SampleCallback(pl.Callback):
 
         text_encoder_training = model.text_encoder.training
         model.text_encoder.eval()
+        model.unet.eval()
 
         for concept in tqdm(sampling_config.concepts, unit="concept"):
             generator = torch.Generator(device=model.pipeline.device).manual_seed(concept.seed)
@@ -57,7 +55,12 @@ class SampleCallback(pl.Callback):
                         model.pipeline(
                             num_images_per_prompt=actual_bsz,
                             generator=generator,
-                            **rename_keys(concept, self._CONFIG_TRANSFORM)
+                            prompt=concept.prompt,
+                            negative_prompt=concept.negative_prompt,
+                            num_inference_steps=concept.steps,
+                            guidance_scale=concept.cfg_scale,
+                            width=concept.width,
+                            height=concept.height,
                         ).images
                     )
                     progress.update(actual_bsz)
@@ -66,6 +69,7 @@ class SampleCallback(pl.Callback):
             samples[concept.prompt] = concept_samples
 
         model.text_encoder.train(text_encoder_training)
+        model.unet.train()
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
