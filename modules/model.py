@@ -18,6 +18,7 @@ from transformers import CLIPTokenizer, CLIPTextModel
 
 from modules.clip import hook_forward
 from modules.convert.common import load_state_dict
+from modules.custom_embeddings import CustomEmbeddingsHooker
 from modules.dataset import get_dataset, collate_fn, get_sampler
 from modules.utils import get_class, physical_core_count
 
@@ -179,6 +180,13 @@ class StableDiffusionModel(pl.LightningModule):
         logger.info("Weights loaded")
 
         hook_forward(text_encoder, -config.clip_stop_at_layer)
+
+        if config.custom_embeddings.enabled:
+            custom_embeddings_hooker = CustomEmbeddingsHooker(config.custom_embeddings.path)
+            custom_embeddings_hooker.hook_clip(text_encoder, tokenizer)
+            embs = custom_embeddings_hooker.embs
+            log = f"Loaded {len(embs)} custom embeddings: {list(embs.keys())}"
+            logger.log(logging.INFO, log)
 
         return cls(config, unet, vae, text_encoder, tokenizer, noise_scheduler)
 
