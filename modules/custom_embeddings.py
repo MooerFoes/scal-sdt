@@ -16,7 +16,7 @@ class CustomEmbeddingsHooker:
             embs[name] = vec
         self.embs = embs
         self.CLIP_keywords = [' '.join(s) for s in self.make_token_names(embs)]
-        self.reg_match = [re.compile(fr"(?:^|(?<=\s)){k}(?=\s|$)") for k in self.embs.keys()]
+        self.reg_match = [re.compile(fr"(?:^|(?<=\s|,)){k}(?=,|\s|$)") for k in self.embs.keys()]
 
     def parse_prompt(self, prompt: str):
         """Parse a prompt string into a list of embedding names and a list of tokens.
