@@ -80,7 +80,7 @@ class ConstantSizeSamplerDB(Sampler):
     def __iter__(self):
         size = (self.size, self.size)
         for index in range(self._len):
-            yield Index(index, size), Index(random.randint(0, self._class_len), size)
+            yield Index(index, size), Index(random.randint(0, self._class_len - 1), size)
 
     def __len__(self):
         return self._len
