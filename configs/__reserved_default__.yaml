@@ -22,6 +22,10 @@ data:
   center_crop: false
   concepts: [ ]
 
+custom_embeddings:
+  enabled: false
+  path: null
+
 uncond:
   # https://openreview.net/pdf?id=lsQCDXjOl3k
   enabled: false
