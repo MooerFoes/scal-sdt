@@ -185,8 +185,8 @@ class StableDiffusionModel(pl.LightningModule):
             custom_embeddings_hooker = CustomEmbeddingsHook(config.custom_embeddings.path)
             custom_embeddings_hooker.hook_clip(text_encoder, tokenizer)
             embs = custom_embeddings_hooker.embs
-            log = f"Loaded {len(embs)} custom embeddings: {list(embs.keys())}"
-            logger.log(logging.INFO, log)
+            info = [f"{k}: {v.shape[0]}" for k, v in embs.items()]
+            logger.info(f"Loaded {len(embs)} custom embeddings: {info}")
 
         return cls(config, unet, vae, text_encoder, tokenizer, noise_scheduler)
 
