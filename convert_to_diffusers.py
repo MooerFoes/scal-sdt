@@ -3,10 +3,8 @@ from typing import Optional
 
 import click
 from diffusers import StableDiffusionPipeline
-from transformers import CLIPTokenizer
 
 from modules.convert.common import DTYPE_CHOICES, DTYPE_MAP
-from modules.convert.sd_to_diffusers import create_diffusers_scheduler
 from modules.model import get_ldm_config, load_ldm_checkpoint
 
 DEFAULT_CONFIG = 'https://raw.githubusercontent.com/CompVis/stable-diffusion/main/configs/stable-diffusion/v1-inference.yaml'
@@ -52,21 +50,21 @@ def main(checkpoint: Path,
 
     config = get_ldm_config(config)
 
-    unet, vae, text_encoder = load_ldm_checkpoint(checkpoint, config, vae)
+    unet, vae, text_encoder, tokenizer, scheduler = load_ldm_checkpoint(checkpoint, config, vae)
 
     unet.to(DTYPE_MAP[unet_dtype])
     # vae.to(DTYPE_MAP[vae_dtype])
     # text_encoder.to(DTYPE_MAP[text_encoder_dtype])
-
-    scheduler = create_diffusers_scheduler(config)
-    tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
 
     pipeline = StableDiffusionPipeline(
         vae=vae,
         text_encoder=text_encoder,
         tokenizer=tokenizer,
         unet=unet,
-        scheduler=scheduler
+        scheduler=scheduler,
+        safety_checker=None,
+        feature_extractor=None,
+        requires_safety_checker=False
     )
 
     pipeline.save_pretrained(output)
