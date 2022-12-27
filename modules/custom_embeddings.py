@@ -1,41 +1,42 @@
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
 import re
+import types
+from pathlib import Path
 
 import torch
 from transformers import CLIPTokenizer, CLIPTextModel
 
 
-class CustomEmbeddingsHooker:
+class CustomEmbeddingsHook:
     def __init__(self, path: Path | str):
         embs = {}
         for p in Path(path).glob('*.pt'):
             name, vec = self.load_emb(p)
-            assert ' ' not in name, f"Embedding name '{name}' contains spaces. This is not allowed."
             embs[name] = vec
         self.embs = embs
-        self.CLIP_keywords = [' '.join(s) for s in self.make_token_names(embs)]
+        self.clip_keywords = [' '.join(s) for s in self.make_token_names(embs)]
         self.reg_match = [re.compile(fr"(?:^|(?<=\s|,)){k}(?=,|\s|$)") for k in self.embs.keys()]
 
     def parse_prompt(self, prompt: str):
         """Parse a prompt string into a list of embedding names and a list of tokens.
         """
-        for m, v in zip(self.reg_match, self.CLIP_keywords):
+        for m, v in zip(self.reg_match, self.clip_keywords):
             prompt = m.sub(v, prompt)
         return prompt
 
     @staticmethod
-    def load_emb(path: Path | str):
+    def load_emb(path: Path | str) -> tuple[str, torch.Tensor]:
         emb = torch.load(path, map_location='cpu')
         name = Path(path).stem
         vecs = list(emb['string_to_param'].values())
-        assert len(vecs) == 1, f"Expected 1 vector per embedding, got {len(vecs)} in {path}"
+
+        assert len(vecs) == 1, f'Embedding "{name}": Expected 1 vector per embedding, got {len(vecs)}.'
+        assert ' ' not in name, f'Embedding "{name}": Name cannot contain spaces.'
+
         vec = vecs[0]
         return name, vec
 
     @staticmethod
-    def make_token_names(embs):
+    def make_token_names(embs: dict[str, torch.Tensor]):
         all_tokens = []
         for name, vec in embs.items():
             tokens = [f'emb-{name}-{i}' for i in range(len(vec))]
@@ -44,8 +45,6 @@ class CustomEmbeddingsHooker:
 
     def hook_clip(self, clip: CLIPTextModel, tokenizer: CLIPTokenizer):
         """Adds custom embeddings to a CLIPTextModel. CLIPTokenizer is hooked to replace the custom embedding tokens with their corresponding CLIP tokens."""
-        lengths = [len(vec) for vec in self.embs.values()]
-
         token_names = self.make_token_names(self.embs)
         token_names = [t for sublist in token_names for t in sublist]  # flatten nested list
 
@@ -64,12 +63,10 @@ class CustomEmbeddingsHooker:
 
         # hook tokenizer to replace emb tokens with their corresponding CLIP tokens
         original_prepare_for_tokenization = tokenizer.prepare_for_tokenization
-        outer = self
 
-        def prepare_for_tokenization(
-            self, text: str, is_split_into_words: bool = False, **kwargs
-        ) -> tuple[str, dict[str, Any]]:
-            text = outer.parse_prompt(text)
+        def prepare_for_tokenization(_, text: str, is_split_into_words: bool = False, **kwargs):
+            text = self.parse_prompt(text)
             r = original_prepare_for_tokenization(text, is_split_into_words, **kwargs)
             return r
-        tokenizer.prepare_for_tokenization = prepare_for_tokenization.__get__(tokenizer, CLIPTokenizer)
+
+        tokenizer.prepare_for_tokenization = types.MethodType(prepare_for_tokenization, tokenizer)
