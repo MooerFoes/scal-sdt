@@ -1,13 +1,18 @@
-from collections.abc import Collection
+import json
+import random
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass
+from os import PathLike
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 import torch
 from PIL import Image
 from omegaconf import ListConfig
+from safetensors import safe_open
 from torch.utils.data import Dataset
 from torchvision import transforms
+from tqdm import tqdm
 from transformers import CLIPTokenizer
 
 from . import Size
@@ -23,12 +28,19 @@ class Concept:
 
 @dataclass
 class Item:
-    path: Path
-    token_ids: list[int]
-    image: Optional[torch.Tensor] = None
-    # Cache
-    latent: Optional[torch.Tensor] = None
-    condition: Optional[torch.Tensor] = None
+    id: int
+    token_ids: torch.Tensor
+    image: torch.Tensor
+
+
+@dataclass
+class CacheItem:
+    id: int
+    latent: torch.Tensor
+    condition: torch.Tensor
+
+
+ItemType = Item | CacheItem
 
 
 @dataclass
@@ -37,11 +49,10 @@ class Index:
     size: Size
 
 
-class ImagePromptDataset(Dataset[Item]):
+class ImagePromptDataset(Dataset[ItemType]):
+    cache: Optional[safe_open] = None
+    _cache_metadata: Optional[dict[str, Any]] = None
     _augment_transforms: Optional[AugmentTransforms] = None
-
-    # cached_conds = False
-    # cached_latents = False
 
     PLACEHOLDER_TXT_PROMPT = "{TXT_PROMPT}"
 
@@ -50,7 +61,8 @@ class ImagePromptDataset(Dataset[Item]):
                  tokenizer: CLIPTokenizer,
                  center_crop=False,
                  pad_tokens=False,
-                 augment_config: Optional[ListConfig] = None):
+                 augment_config: Optional[ListConfig] = None,
+                 cache_file: Optional[str | PathLike] = None):
         self.dir_prompt_map = {Path(concept.path): concept.prompt for concept in concepts}
         self.image_paths = list(list_images(*self.dir_prompt_map.keys()))
 
@@ -62,16 +74,28 @@ class ImagePromptDataset(Dataset[Item]):
             from .augment import AugmentTransforms
             self._augment_transforms = AugmentTransforms(augment_config)
 
+        if cache_file is not None:
+            self.cache = safe_open(cache_file, framework="pt", device="cpu")
+            self._cache_metadata = json.loads(self.cache.metadata()["json"])
+
     def __getitem__(self, index: Index):
-        path = self.image_paths[index.value]
-        return Item(
-            path=path,
-            image=self._read_and_transform(path, index.size),
-            token_ids=self._tokenize(self._get_prompt(path))
-        )
+        if self.cache is None:
+            path = self.image_paths[index.value]
+            return Item(
+                id=index.value,
+                image=self._read_and_transform(path, index.size),
+                token_ids=self._tokenize(self._get_prompt(path))
+            )
+        else:
+            return CacheItem(
+                id=index.value,
+                latent=self.cache.get_tensor(
+                    f"{index.value}.latent.{random.randint(0, self._cache_metadata['aug_group_size'] - 1)}"),
+                condition=self.cache.get_tensor(f"{index.value}.cond")
+            )
 
     def __len__(self) -> int:
-        return len(self.image_paths)
+        return len(self.image_paths) if self.cache is None else self._cache_metadata["total_entries"]
 
     def _get_prompt(self, path: Path) -> str:
         prompt = self.dir_prompt_map[path.parent]
@@ -88,12 +112,13 @@ class ImagePromptDataset(Dataset[Item]):
         prompt = prompt.replace(self.PLACEHOLDER_TXT_PROMPT, txt_prompt)
         return prompt
 
-    def _tokenize(self, prompt: str) -> list[int]:
+    def _tokenize(self, prompt: str) -> torch.Tensor:
         return self.tokenizer(
             prompt,
             padding="max_length" if self.pad_tokens else "do_not_pad",
             truncation=True,
             max_length=self.tokenizer.model_max_length,
+            return_tensors="pt"
         ).input_ids
 
     def _augment(self, image: torch.Tensor) -> torch.Tensor:
@@ -103,7 +128,6 @@ class ImagePromptDataset(Dataset[Item]):
         return image
 
     def _read_and_transform(self, path: Path, size: Size) -> torch.Tensor:
-        # if not self.cached_latents:
         pil_image: Image.Image = read_image(path)
         dim = size[0]
         image: torch.Tensor = transforms.Compose(
@@ -118,28 +142,31 @@ class ImagePromptDataset(Dataset[Item]):
         image = transforms.Normalize([0.5], [0.5])(image)
         return image
 
-    # def do_cache(self, vae: AutoencoderKL, text_encoder: CLIPTextModel = None):
-    #     train_dataloader = torch.utils.data.DataLoader(
-    #         self, shuffle=True, collate_fn=lambda x: x, pin_memory=True
-    #     )
-    #
-    #     with torch.inference_mode():
-    #         for batch in tqdm(train_dataloader):
-    #             for entry in batch:
-    #                 entry.latent = vae.encode(entry.image).latent_dist.sample() * 0.18215
-    #                 if text_encoder is not None:
-    #                     entry.cond = text_encoder.forward(entry.token_ids)
-    #
-    #     self.cached_latents = True
-    #     if text_encoder is not None:
-    #         self.cached_conds = True
+
+def get_id_size_map(image_paths: Iterable[Path]):
+    id_size_map = {}
+    for i, path in enumerate(tqdm(image_paths, desc="Loading resolution from entries")):
+        path: Path
+        with Image.open(path) as img:
+            size = img.size
+        id_size_map[i] = size
+    return id_size_map
 
 
 class AspectDataset(ImagePromptDataset):
+    id_size_map: dict[int, Size] = {}
 
     def __init__(self, *args, debug=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.debug = debug
+
+        if self.cache is None:
+            self.id_size_map = get_id_size_map(self.image_paths)
+        else:
+            sizes_info = self._cache_metadata["sizes"]
+            self.id_size_map = {}
+            for k in self._cache_metadata["entries"]:
+                self.id_size_map[k] = Size(sizes_info[f"{k}.latent.0"])
 
     def _get_transform(self, size: Size, dsize: Size):
         w_t, h_t = self._perserve_ratio_size(size, dsize)
@@ -198,35 +225,18 @@ class AspectDataset(ImagePromptDataset):
         return w_t, h_t
 
 
-class DBDataset(Dataset[tuple[Item, Item]]):
+class DBDataset(Dataset[tuple[ItemType, ItemType]]):
 
     def __init__(self,
-                 instance_set: ImagePromptDataset,
-                 class_set: ImagePromptDataset):
+                 instance_set: ImagePromptDataset | AspectDataset,
+                 class_set: ImagePromptDataset | AspectDataset):
         self.instance_set = instance_set
         self.class_set = class_set
 
     def __len__(self) -> int:
         return len(self.instance_set)
 
-    def __getitem__(self, index: tuple[Index, Index]) -> tuple[Item, Item]:
+    def __getitem__(self, index: tuple[Index, Index]) -> tuple[ItemType, ItemType]:
         instance = self.instance_set[index[0]]
         class_ = self.class_set[index[1]]
         return instance, class_
-
-    # def do_cache(self, vae: AutoencoderKL, text_encoder: CLIPTextModel = None):
-    #     train_dataloader = torch.utils.data.DataLoader(
-    #         self, shuffle=True, collate_fn=lambda x: x, pin_memory=True
-    #     )
-    #
-    #     with torch.inference_mode():
-    #         for batch in tqdm(train_dataloader):
-    #             for entries in batch:
-    #                 for entry in entries:
-    #                     entry.latent = vae.encode(entry.image).latent_dist.sample() * 0.18215
-    #                     if text_encoder is not None:
-    #                         entry.cond = text_encoder.forward(entry.token_ids)
-    #
-    #     self.cached_latents = True
-    #     if text_encoder is not None:
-    #         self.cached_conds = True

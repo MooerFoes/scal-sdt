@@ -19,7 +19,7 @@ from transformers import CLIPTokenizer, CLIPTextModel
 from modules.clip import hook_forward
 from modules.convert.common import load_state_dict
 from modules.custom_embeddings import CustomEmbeddingsHook
-from modules.dataset import get_dataset, collate_fn, get_sampler
+from modules.dataset import get_dataset, get_sampler, get_collate_fn
 from modules.utils import get_class, physical_core_count
 
 logger = logging.getLogger()
@@ -232,11 +232,10 @@ class StableDiffusionModel(pl.LightningModule):
         return self.text_encoder.forward(token_ids).last_hidden_state
 
     def training_step(self, batch, batch_idx):
-        # if batch.latents is not None:
-        #     latents = batch.latents
-        # else:
-        #     latents = self.vae_encode(batch["images"])
-        latents = self._vae_encode(batch["images"]).to(self.unet.dtype)
+        if "latents" in batch:
+            latents = batch["latents"].to(self.unet.dtype)
+        else:
+            latents = self._vae_encode(batch["images"]).to(self.unet.dtype)
 
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents)
@@ -250,11 +249,10 @@ class StableDiffusionModel(pl.LightningModule):
         noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
 
         # Get the text embedding for conditioning
-        # if self.config.train_text_encoder:
-        #     conds = self.text_encoder.forward(batch["token_ids"])
-        # else:
-        #     conds = batch.conds
-        conds = self._get_embedding(batch["token_ids"]).to(self.unet.dtype)
+        if "conds" in batch:
+            conds = batch["conds"].to(self.unet.dtype)
+        else:
+            conds = self._get_embedding(batch["token_ids"]).to(self.unet.dtype)
 
         # Predict the noise residual
         noise_pred = self.unet(noisy_latents, timesteps, conds).sample
@@ -281,8 +279,9 @@ class StableDiffusionModel(pl.LightningModule):
         })
         return loss
 
-    def train_dataloader(self):
-        train_dataset = get_dataset(self.config, self.tokenizer)
+    def train_dataloader(self, use_cache=True):
+        use_cache = self.config.data.cache is not None and use_cache
+        train_dataset = get_dataset(self.config, self.tokenizer, use_cache)
 
         sampler = get_sampler(train_dataset, self.config, self.trainer.world_size, self.trainer.global_rank)
 
@@ -290,9 +289,9 @@ class StableDiffusionModel(pl.LightningModule):
             train_dataset,
             sampler=sampler,
             batch_size=self.config.batch_size,
-            collate_fn=collate_fn,
+            collate_fn=get_collate_fn(use_cache),
             num_workers=physical_core_count() if self.config.num_workers is None else self.config.num_workers,
-            persistent_workers=True
+            persistent_workers=self.config.num_workers is None or self.config.num_workers > 0
         )
         return train_dataloader
 

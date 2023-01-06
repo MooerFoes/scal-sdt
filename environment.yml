@@ -26,6 +26,7 @@ dependencies:
   - xformers=0.0.15.dev343+git.1b1fd8a
   - wandb
   - pip:
+      - safetensors~=0.2
       - bitsandbytes~=0.35
       - torch-ema==0.3
       - git+https://github.com/CCRcmcpe/diffusers.git

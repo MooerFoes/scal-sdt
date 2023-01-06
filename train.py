@@ -54,7 +54,11 @@ def get_params():
 
 def verify_config(config: DictConfig):
     concepts = config.data.concepts
-    assert any(concepts)
+
+    if any(concepts) and config.data.cache:
+        logger.warning("One or more concept is set, but won't be used as cache is specified")
+    elif not any(concepts):
+        raise Exception("No concept found and cache file is not specified")
 
     if not config.prior_preservation.enabled:
         logger.info("Running: Standard Finetuning")
@@ -105,13 +109,6 @@ def main(args: Namespace, config: DictConfig):
         pl.seed_everything(config.seed)
 
     model = StableDiffusionModel.from_config(config)
-
-    # TODO
-    # if not ("augment" in config.data and any(config.data.augment)):
-    # if config.train_text_encoder:
-    #     train_dataset.do_cache(model.vae)
-    # else:
-    #     train_dataset.do_cache(model.vae, model.text_encoder)
 
     loggers = get_loggers(config)
 

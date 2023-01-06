@@ -7,18 +7,19 @@ from transformers import CLIPTokenizer
 Size = tuple[int, int]
 
 from .samplers import ConstantSizeSampler, AspectSampler, AspectSamplerDB, ConstantSizeSamplerDB
-from .datasets import Item, Concept, ImagePromptDataset, DBDataset, AspectDataset
+from .datasets import Item, Concept, ImagePromptDataset, DBDataset, AspectDataset, CacheItem, ItemType
 
 SSDT_Dataset = ImagePromptDataset | AspectDataset | DBDataset
 
 
-def get_dataset(config: DictConfig, tokenizer: CLIPTokenizer):
+def get_dataset(config: DictConfig, tokenizer: CLIPTokenizer, use_cache=True):
     dataset_type = ImagePromptDataset if not config.aspect_ratio_bucket.enabled else AspectDataset
     dataset_params = {
         "tokenizer": tokenizer,
         "center_crop": config.data.center_crop,
         "pad_tokens": config.pad_tokens,
-        "augment_config": config.get("augment")
+        "augment_config": config.get("augment"),
+        "cache_file": config.data.cache if use_cache else None
     }
 
     instance_concepts = [Concept(concept.instance_set.path, concept.instance_set.prompt)
@@ -53,48 +54,50 @@ def get_sampler(dataset: SSDT_Dataset, config: DictConfig, world_size: int, glob
     return sampler_type(**arb_params)
 
 
-def collate_fn(batch: Iterable[Item | tuple[Item, Item]]):
-    token_ids_array = list[list[int]]()
-    images_array = list[torch.Tensor]()
+def get_collate_fn(cache: bool):
+    def collate_fn(batch: Iterable[ItemType | tuple[ItemType, ItemType]]):
+        token_ids_array = list[torch.Tensor]()
+        images_array = list[torch.Tensor]()
 
-    # Cache
-    # conditions_array = list[torch.Tensor]()
-    # latents_array = list[torch.Tensor]()
+        # Cache
+        conditions_array = list[torch.Tensor]()
+        latents_array = list[torch.Tensor]()
 
-    class_items = []
+        ids = list[int]()
 
-    def append(item: Item):
-        token_ids_array.append(item.token_ids)
-        images_array.append(item.image)
-        # conditions_array.append(item.latent)
-        # latents_array.append(item.condition)
+        class_items = []
 
-    for x in batch:
-        if isinstance(x, tuple):
-            x: tuple[Item, Item]
-            instance_item, class_item = x
-            append(instance_item)
-            class_items.append(class_item)
+        def append(item: ItemType):
+            if cache:
+                conditions_array.append(item.condition)
+                latents_array.append(item.latent)
+            else:
+                token_ids_array.append(item.token_ids)
+                images_array.append(item.image)
+            ids.append(item.id)
+
+        for x in batch:
+            if isinstance(x, tuple):
+                instance_item, class_item = x
+                append(instance_item)
+                class_items.append(class_item)
+            else:
+                append(x)
+
+        for class_item in class_items:
+            append(class_item)
+
+        if not cache:
+            return {
+                "ids": ids,
+                "token_ids": torch.cat(token_ids_array),
+                "images": torch.stack(images_array)
+            }
         else:
-            x: Item
-            append(x)
+            return {
+                "ids": ids,
+                "conds": torch.stack(conditions_array),
+                "latents": torch.stack(latents_array)
+            }
 
-    for class_item in class_items:
-        append(class_item)
-
-    images = torch.stack(images_array)
-    images = images.to(dtype=torch.float32, memory_format=torch.contiguous_format)
-
-    token_ids = torch.tensor(token_ids_array, dtype=torch.int64)
-
-    # conditions = torch.stack(conditions_array)
-    #
-    # latents = torch.stack(latents_array)
-
-    batch = {
-        "token_ids": token_ids,
-        "images": images,
-        # "conditions": conditions,
-        # "latents": latents
-    }
-    return batch
+    return collate_fn

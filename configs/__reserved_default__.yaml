@@ -21,6 +21,7 @@ data:
   resolution: 512
   center_crop: false
   concepts: [ ]
+  cache: null
 
 custom_embeddings:
   enabled: false

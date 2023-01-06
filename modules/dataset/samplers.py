@@ -1,16 +1,12 @@
 import copy
 import random
-from collections.abc import Iterable
-from pathlib import Path
 
-from PIL import Image
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import Sampler
-from tqdm.auto import tqdm
 
 from . import Size
 from .bucket import BucketManager
-from .datasets import ImagePromptDataset, DBDataset, Index
+from .datasets import ImagePromptDataset, DBDataset, Index, AspectDataset
 
 
 def scale_bucket_params(dim: int, c_size: float, c_dim: float, c_div: float):
@@ -36,18 +32,6 @@ def get_gen_bucket_params(dim: int, bucket_config: DictConfig):
         params = OmegaConf.merge(params, manual)
 
     return params
-
-
-def get_id_size_map(paths: Iterable[Path]) -> dict[int, Size]:
-    id_size_map = {}
-
-    for i, path in enumerate(tqdm(paths, desc="Loading resolution from entries")):
-        path: Path
-        with Image.open(path) as img:
-            size = img.size
-        id_size_map[i] = size
-
-    return id_size_map
 
 
 class ConstantSizeSampler(Sampler):
@@ -89,7 +73,7 @@ class ConstantSizeSamplerDB(Sampler):
 class AspectSampler(Sampler):
 
     def __init__(self,
-                 data_source: ImagePromptDataset,
+                 data_source: AspectDataset,
                  base_size: int,
                  bucket_config: DictConfig,
                  batch_size: int,
@@ -103,11 +87,9 @@ class AspectSampler(Sampler):
         bucket_params = get_gen_bucket_params(base_size, bucket_config)
         bucket_manager.gen_buckets(**bucket_params)
 
-        id_size_map = get_id_size_map(data_source.image_paths)
-        bucket_manager.put_in(id_size_map, bucket_config.max_aspect_error)
+        bucket_manager.put_in(data_source.id_size_map, bucket_config.max_aspect_error)
 
         self.bucket_manager = bucket_manager
-        self._image_paths = data_source.image_paths
         self._world_size = world_size
         self._batch_size = batch_size
 
@@ -139,8 +121,7 @@ class AspectSamplerDB(Sampler):
         bucket_manager.gen_buckets(**bucket_params)
         instance_buckets = copy.deepcopy(bucket_manager.buckets)
 
-        id_size_map = get_id_size_map(data_source.instance_set.image_paths)
-        bucket_manager.put_in(id_size_map, bucket_config.max_aspect_error)
+        bucket_manager.put_in(data_source.instance_set.id_size_map, bucket_config.max_aspect_error)
 
         self.bucket_manager = bucket_manager
         self._image_paths = data_source.instance_set.image_paths
@@ -153,8 +134,7 @@ class AspectSamplerDB(Sampler):
 
         self.class_bucket_id_map = dict[Size, list[int]]()
 
-        class_id_size_map = get_id_size_map(data_source.class_set.image_paths)
-        class_bucket_manager.put_in(class_id_size_map, bucket_config.max_aspect_error)
+        class_bucket_manager.put_in(data_source.class_set.id_size_map, bucket_config.max_aspect_error)
 
         for batch, size in class_bucket_manager.generator():
             class_id = batch[0]

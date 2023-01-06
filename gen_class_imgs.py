@@ -1,17 +1,19 @@
 import hashlib
 import logging
 from pathlib import Path
+from typing import IO
 
 import click
 import torch
 from PIL import Image
 from diffusers.pipelines import StableDiffusionPipeline
-from omegaconf import OmegaConf
 from tqdm import tqdm
 
+from modules.config import load_with_defaults
 from modules.dataset import Size
 from modules.dataset.bucket import BucketManager
-from modules.dataset.samplers import get_id_size_map, get_gen_bucket_params
+from modules.dataset.datasets import get_id_size_map
+from modules.dataset.samplers import get_gen_bucket_params
 from modules.model import StableDiffusionModel
 from modules.utils import list_images
 
@@ -76,10 +78,9 @@ def generate_class_images(pipeline: StableDiffusionPipeline, concept, size_dist:
 
 
 @click.command()
-@click.option("--config", required=True)
-def main(config):
-    default_config = OmegaConf.load('configs/__reserved_default__.yaml')
-    config = OmegaConf.merge(default_config, OmegaConf.load(config))
+@click.option("--config", "config_file", type=click.File("r"))
+def main(config_file: IO[str]):
+    config = load_with_defaults(config_file)
 
     if not config.prior_preservation.enabled:
         logger.warning("Prior preservation not enabled. Class image generation is not needed.")
