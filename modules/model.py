@@ -190,8 +190,7 @@ class StableDiffusionModel(pl.LightningModule):
             info = [f"{k}: {v.shape[0]}" for k, v in embs.items()]
             logger.info(f"Loaded {len(embs)} custom embeddings: {info}")
 
-        if config.optim_target != "full_unet":
-            config.optim_target = OmegaConf.load(OPTIM_TARGETS_DIR / (config.optim_target + ".yaml"))
+        config.optim_target = OmegaConf.load(OPTIM_TARGETS_DIR / (config.optim_target + ".yaml"))
 
         return cls(config, unet, vae, text_encoder, tokenizer, noise_scheduler)
 
@@ -215,12 +214,6 @@ class StableDiffusionModel(pl.LightningModule):
     @staticmethod
     def _config_unet(config: DictConfig, unet: UNet2DConditionModel):
         params_to_optimize = list[nn.Parameter]()
-
-        blocks = list(itertools.chain(
-            unet.get_submodule("down_blocks"),
-            [unet.get_submodule("mid_block")],
-            unet.get_submodule("up_blocks")
-        ))
 
         def apply_module_config(modules: list[nn.Module], module_configs: ListConfig, fn):
             for module_config in module_configs:
@@ -277,8 +270,18 @@ class StableDiffusionModel(pl.LightningModule):
                     apply_resnet_config
                 )
 
+        if config.get("all", False):
+            return list(unet.parameters())
+
+        blocks = list(itertools.chain(
+            unet.get_submodule("down_blocks"),
+            [unet.get_submodule("mid_block")],
+            unet.get_submodule("up_blocks")
+        ))
+
         apply_module_config(blocks, config.blocks, apply_block_config)
         return params_to_optimize
+
 
     @torch.no_grad()
     def _vae_encode(self, image):
@@ -386,8 +389,7 @@ class StableDiffusionModel(pl.LightningModule):
         return train_dataloader
 
     def configure_optimizers(self):
-        params_to_optimize = self._config_net(self.config.optim_target, self.unet, self.text_encoder) \
-            if self.config.optim_target != "full_unet" else self.unet.parameters()
+        params_to_optimize = self._config_net(self.config.optim_target, self.unet, self.text_encoder)
 
         optimizer = get_optimizer(params_to_optimize, self.config, self.trainer)
         lr_scheduler = get_lr_scheduler(self.config, optimizer)
