@@ -12,11 +12,16 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 import torch.utils.data
 from diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel, StableDiffusionPipeline
-from omegaconf import DictConfig, OmegaConf
+from diffusers.models.attention import BasicTransformerBlock, CrossAttention
+from diffusers.models.resnet import ResnetBlock2D
+from diffusers.models.unet_2d_blocks import CrossAttnDownBlock2D, DownBlock2D
+from omegaconf import DictConfig, OmegaConf, ListConfig
+from torch import nn
 from torch_ema import ExponentialMovingAverage
 from transformers import CLIPTokenizer, CLIPTextModel
 
 from modules.clip import hook_forward
+from modules.config import OPTIM_TARGETS_DIR
 from modules.convert.common import load_state_dict
 from modules.custom_embeddings import CustomEmbeddingsHook
 from modules.dataset import get_dataset, get_sampler, get_collate_fn
@@ -142,15 +147,12 @@ class StableDiffusionModel(pl.LightningModule):
         super().__init__()
 
         vae.requires_grad_(False)
-        if not config.train_text_encoder:
-            text_encoder.requires_grad_(False)
-            self._text_encode_context_cls = torch.no_grad
-        else:
-            self._text_encode_context_cls = nullcontext
+        text_encoder.requires_grad_(False)
+        unet.requires_grad_(False)
 
         if config.gradient_checkpointing:
             unet.enable_gradient_checkpointing()
-            if config.train_text_encoder:
+            if hasattr(self.optim_target, "text_encoder"):
                 text_encoder.gradient_checkpointing_enable()
 
         if config.xformers:
@@ -188,7 +190,95 @@ class StableDiffusionModel(pl.LightningModule):
             info = [f"{k}: {v.shape[0]}" for k, v in embs.items()]
             logger.info(f"Loaded {len(embs)} custom embeddings: {info}")
 
+        if config.optim_target != "full_unet":
+            config.optim_target = OmegaConf.load(OPTIM_TARGETS_DIR / (config.optim_target + ".yaml"))
+
         return cls(config, unet, vae, text_encoder, tokenizer, noise_scheduler)
+
+    def _config_net(self, config: DictConfig, unet: UNet2DConditionModel, text_encoder: CLIPTextModel):
+        params_to_optimize = list[nn.Parameter]()
+
+        if (unet_config := config.get("unet")) is not None:
+            params_to_optimize.extend(StableDiffusionModel._config_unet(unet_config, unet))
+
+        if (te_config := config.get("text_encoder")) is not None:
+            params_to_optimize.extend(text_encoder.parameters())
+            self._text_encode_context_cls = nullcontext
+        else:
+            self._text_encode_context_cls = torch.no_grad
+
+        for param in params_to_optimize:
+            param.requires_grad = True
+
+        return params_to_optimize
+
+    @staticmethod
+    def _config_unet(config: DictConfig, unet: UNet2DConditionModel):
+        params_to_optimize = list[nn.Parameter]()
+
+        blocks = list(itertools.chain(
+            unet.get_submodule("down_blocks"),
+            [unet.get_submodule("mid_block")],
+            unet.get_submodule("up_blocks")
+        ))
+
+        def apply_module_config(modules: list[nn.Module], module_configs: ListConfig, fn):
+            for module_config in module_configs:
+                if module_config.get("index") is None:
+                    for module in modules:
+                        fn(module, module_config)
+                else:
+                    for module_index in module_config.index:
+                        fn(modules[module_index], module_config)
+
+        def config_attention(attention: CrossAttention, config: DictConfig):
+            # TODO LORA
+
+            if (q_config := config.get("q")) is not None:
+                params_to_optimize.extend(attention.get_submodule("to_q").parameters())
+
+            if (k_config := config.get("k")) is not None:
+                params_to_optimize.extend(attention.get_submodule("to_k").parameters())
+
+            if (v_config := config.get("v")) is not None:
+                params_to_optimize.extend(attention.get_submodule("to_v").parameters())
+
+        def apply_transformer_config(transformer: BasicTransformerBlock, config: DictConfig):
+            if (cross_attn_config := config.get("cross_attn")) is not None:
+                cross_attn = transformer.get_submodule("attn1")
+                config_attention(cross_attn, cross_attn_config)
+
+            if (self_attn_config := config.get("self_attn")) is not None:
+                self_attn = transformer.get_submodule("attn2")
+                config_attention(self_attn, self_attn_config)
+
+            if (ff_config := config.get("feed_forward")) is not None:
+                feed_forward = transformer.get_submodule("ff")  # TODO Linear. LORA?
+                params_to_optimize.extend(feed_forward.parameters())
+
+            # TODO FEED FORWARD
+
+        def apply_resnet_config(resblock: ResnetBlock2D, config: DictConfig):
+            # TODO LORA?
+            params_to_optimize.extend(resblock.parameters())
+
+        def apply_block_config(block: CrossAttnDownBlock2D | DownBlock2D, config: DictConfig):
+            if (transformer_configs := config.get("transformer")) is not None:
+                apply_module_config(
+                    list(itertools.chain(*[transformer_2d_model.get_submodule("transformer_blocks")
+                                           for transformer_2d_model in block.get_submodule("attentions")])),
+                    transformer_configs,
+                    apply_transformer_config
+                )
+            if (resnet_configs := config.get("resnet")) is not None:
+                apply_module_config(
+                    list(block.get_submodule("resnets")),
+                    resnet_configs,
+                    apply_resnet_config
+                )
+
+        apply_module_config(blocks, config.blocks, apply_block_config)
+        return params_to_optimize
 
     @torch.no_grad()
     def _vae_encode(self, image):
@@ -296,8 +386,9 @@ class StableDiffusionModel(pl.LightningModule):
         return train_dataloader
 
     def configure_optimizers(self):
-        params_to_optimize = itertools.chain(self.unet.parameters(), self.text_encoder.parameters()) \
-            if self.config.train_text_encoder else self.unet.parameters()
+        params_to_optimize = self._config_net(self.config.optim_target, self.unet, self.text_encoder) \
+            if self.config.optim_target != "full_unet" else self.unet.parameters()
+
         optimizer = get_optimizer(params_to_optimize, self.config, self.trainer)
         lr_scheduler = get_lr_scheduler(self.config, optimizer)
         return {
@@ -334,7 +425,7 @@ class StableDiffusionModel(pl.LightningModule):
 
         text_encoder_dict = {}
         # Save text encoder state only if it was unfreezed
-        if self.config.train_text_encoder:
+        if hasattr(self.optim_target, "text_encoder"):
             text_encoder_dict = {"cond_stage_model.transformer." + k.removeprefix("text_encoder."): v
                                  for k, v in state_dict.items() if k.startswith("text_encoder.")}
 
@@ -373,7 +464,7 @@ class StableDiffusionModel(pl.LightningModule):
 
         self.unet.load_state_dict(state_dict["unet"])
 
-        if self.config.train_text_encoder:
+        if hasattr(self.optim_target, "text_encoder"):
             self.text_encoder.load_state_dict(state_dict["text_encoder"])
 
     @property

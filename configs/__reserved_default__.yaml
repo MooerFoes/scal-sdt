@@ -9,13 +9,13 @@ project: 'SCAL-SDT'
 batch_size: 1
 num_workers: null
 seed: null
-train_text_encoder: false
 gradient_checkpointing: false
 med_vram: false
 xformers: true
 clip_stop_at_layer: 1
 pad_tokens: true
 force_disable_amp: false
+optim_target: 'full_unet'
 
 data:
   resolution: 512

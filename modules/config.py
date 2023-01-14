@@ -5,6 +5,7 @@ from typing import IO
 from omegaconf import OmegaConf
 
 CONFIGS_DIR = Path(__file__).parent.parent / "configs"
+OPTIM_TARGETS_DIR = CONFIGS_DIR / "optim_targets"
 DEFAULT = CONFIGS_DIR / '__reserved_default__.yaml'
 
 
