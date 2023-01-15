@@ -1,16 +1,21 @@
 # SCAL-SDT
 
-Stable Diffusion trainer with scalable dataset size and hardware usage.
+Scalable Stable Diffusion Trainer
 
-[!] IN EARLY DEVELOPMENT, CONFIGS AND ARGUMENTS SUBJECT TO BREAKING CHANGES
+[!] IN EARLY DEVELOPMENT, CONFIGS SUBJECT TO BREAKING CHANGES
 
 ## Features
 
-* Can run with 10G or less VRAM without losing speed thanks to xformers memory efficient attention and int8 optimizers.
+* Can run with <8GB VRAM
 * [Aspect Ratio Bucketing](https://github.com/NovelAI/novelai-aspect-ratio-bucketing)
-* DreamBooth
 * CLIP skip
 * WandB logging
+
+Customizable training objective, including:
+
+* [DreamBooth](https://arxiv.org/abs/2208.12242)
+* [Custom Diffusion](https://github.com/adobe-research/custom-diffusion) (Partial)
+* [Low-Rank Adaptation (LoRA)](https://arxiv.org/abs/2106.09685)
 
 ## Getting Started
 
@@ -21,7 +26,7 @@ Linux is recommended, on Windows you have to install `bitsandbytes` manually for
 #### Conda
 
 ```shell
-conda env create environment.yml
+conda env create -f environment.yml
 conda activate ssdt
 ```
 
@@ -57,12 +62,12 @@ python train.py --config configs/your_config.yaml
 
 ### After Training
 
-Note although the checkpoints have `.ckpt` extension, they are NOT directly usable to interfaces based on
-the [official SD code base](https://github.com/CompVis/stable-diffusion)
-like [WebUI](https://github.com/AUTOMATIC1111/stable-diffusion-webui). To convert them into SD checkpoints:
+[WebUI](https://github.com/AUTOMATIC1111/stable-diffusion-webui)
+may not directly load the checkpoints due to the safe loading mechanism.
+To solve this issue and reduce checkpoint size, prune and convert the checkpoint:
 
 ```shell
-python convert_to_sd.py PATH_TO_THE_CKPT OUTPUTDIR --no-text-encoder --unet-dtype fp16
+python ckpt_tool.py prune INPUT_CKPT OUTPUT_CKPT --no-text-encoder --unet-dtype fp16
 ```
 
 `--no-text-encoder --unet-dtype fp16` results a ~2GB checkpoint, containing fp16 UNet and fp32 VAE weights, WebUI
