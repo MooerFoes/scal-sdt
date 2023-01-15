@@ -23,7 +23,7 @@ dependencies:
   - ftfy
   - accelerate
   - psutil
-  - xformers=0.0.15.dev343+git.1b1fd8a
+  - xformers=0.0.16.dev419+git.6a988dd
   - wandb
   - pip:
       - safetensors~=0.2
