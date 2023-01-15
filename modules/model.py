@@ -196,6 +196,8 @@ class StableDiffusionModel(pl.LightningModule):
         text_encoder.requires_grad_(False)
         unet.requires_grad_(False)
 
+        self.params_to_optimize = self._config_net(config.optim_target, unet, text_encoder)
+
         if config.gradient_checkpointing:
             unet.enable_gradient_checkpointing()
             if hasattr(self.config.optim_target, "text_encoder"):
@@ -357,8 +359,7 @@ class StableDiffusionModel(pl.LightningModule):
         return train_dataloader
 
     def configure_optimizers(self):
-        params_to_optimize = self._config_net(self.config.optim_target, self.unet, self.text_encoder)
-        optimizer = get_optimizer(params_to_optimize, self.config, self.trainer)
+        optimizer = get_optimizer(self.params_to_optimize, self.config, self.trainer)
         lr_scheduler = get_lr_scheduler(self.config, optimizer)
         return {
             "optimizer": optimizer,
