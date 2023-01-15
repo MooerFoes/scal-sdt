@@ -54,50 +54,48 @@ def get_sampler(dataset: SSDT_Dataset, config: DictConfig, world_size: int, glob
     return sampler_type(**arb_params)
 
 
-def get_collate_fn(cache: bool):
-    def collate_fn(batch: Iterable[ItemType | tuple[ItemType, ItemType]]):
-        token_ids_array = list[torch.Tensor]()
-        images_array = list[torch.Tensor]()
+def collate_fn(batch: Iterable[ItemType | tuple[ItemType, ItemType]]):
+    token_ids_array = list[torch.Tensor]()
+    images_array = list[torch.Tensor]()
 
-        # Cache
-        conditions_array = list[torch.Tensor]()
-        latents_array = list[torch.Tensor]()
+    # Cache
+    conditions_array = list[torch.Tensor]()
+    latents_array = list[torch.Tensor]()
 
-        ids = list[int]()
+    ids = list[int]()
 
-        class_items = []
+    class_items = []
 
-        def append(item: ItemType):
-            if cache:
-                conditions_array.append(item.condition)
-                latents_array.append(item.latent)
-            else:
-                token_ids_array.append(item.token_ids)
-                images_array.append(item.image)
-            ids.append(item.id)
-
-        for x in batch:
-            if isinstance(x, tuple):
-                instance_item, class_item = x
-                append(instance_item)
-                class_items.append(class_item)
-            else:
-                append(x)
-
-        for class_item in class_items:
-            append(class_item)
-
-        if not cache:
-            return {
-                "ids": ids,
-                "token_ids": torch.cat(token_ids_array),
-                "images": torch.stack(images_array)
-            }
+    def append(item: ItemType):
+        ids.append(item.id)
+        if isinstance(item, Item):
+            token_ids_array.append(item.token_ids)
+            images_array.append(item.image)
+        elif isinstance(item, CacheItem):
+            conditions_array.append(item.condition)
+            latents_array.append(item.latent)
         else:
-            return {
-                "ids": ids,
-                "conds": torch.stack(conditions_array),
-                "latents": torch.stack(latents_array)
-            }
+            raise Exception()
 
-    return collate_fn
+    for x in batch:
+        if isinstance(x, tuple):
+            instance_item, class_item = x
+            append(instance_item)
+            class_items.append(class_item)
+        else:
+            append(x)
+
+    for class_item in class_items:
+        append(class_item)
+
+    result = {"ids": ids}
+
+    if any(latents_array):
+        result["latents"] = torch.stack(latents_array)
+        if any(conditions_array):
+            result["conds"] = torch.stack(conditions_array)
+    else:
+        result["token_ids"] = torch.cat(token_ids_array)
+        result["images"] = torch.stack(images_array)
+
+    return result

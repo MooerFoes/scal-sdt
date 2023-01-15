@@ -19,7 +19,7 @@ from modules.clip import hook_forward
 from modules.config import OPTIM_TARGETS_DIR
 from modules.convert.common import load_state_dict
 from modules.custom_embeddings import CustomEmbeddingsHook
-from modules.dataset import get_dataset, get_sampler, get_collate_fn
+from modules.dataset import get_dataset, get_sampler, collate_fn
 from modules.lora import get_lora
 from modules.utils import get_class, physical_core_count
 
@@ -352,7 +352,7 @@ class StableDiffusionModel(pl.LightningModule):
             train_dataset,
             sampler=sampler,
             batch_size=self.config.batch_size,
-            collate_fn=get_collate_fn(use_cache),
+            collate_fn=collate_fn,
             num_workers=physical_core_count() if self.config.num_workers is None else self.config.num_workers,
             persistent_workers=self.config.num_workers is None or self.config.num_workers > 0
         )
