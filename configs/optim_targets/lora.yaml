@@ -1,19 +1,49 @@
+# LoRA, reference: https://github.com/kohya-ss/sd-webui-additional-networks/blob/558a6092a69009d55ae70fd24350eea9fb1ab97c/scripts/additional_networks.py
+
 unet:
   parameterization: 'eps'
-  blocks:
-    - index: [ 0, 1, 2, 4, 6, 7, 8 ]
-      transformer:
-        - cross_attn:
-            q:
-              low_rank: 4
-            k:
-              low_rank: 4
-            v:
-              low_rank: 4
-          self_attn:
-            q:
-              low_rank: 4
-            k:
-              low_rank: 4
-            v:
-              low_rank: 4
+  targets:
+    - index: [ 'down_blocks.0', 'down_blocks.1', 'down_blocks.2', 'mid_block', 'up_blocks.1', 'up_blocks.2', 'up_blocks.3' ]
+      targets:
+        - index: [ 'attentions' ]
+          targets:
+            - targets:
+                - index: [ 'transformer_blocks' ]
+                  targets:
+                    - targets:
+                        - index: [ 'attn1', 'attn2' ]
+                          targets:
+                            - index: [ 'to_q', 'to_k', 'to_v', 'to_out.0' ]
+                              lora:
+                                rank: 4
+                                alpha: 1
+                                dropout: 0.
+                        - index: [ 'ff.net.0.proj', 'ff.net.2' ]
+                          lora:
+                            rank: 4
+                            alpha: 1
+                            dropout: 0.
+                - index: [ 'proj_in', 'proj_out' ]
+                  lora:
+                    rank: 4
+                    alpha: 1
+                    dropout: 0.
+text_encoder:
+  targets:
+    - index: [ 'text_model.encoder.layers' ]
+      targets:
+        - targets:
+            - index: [ 'self_attn' ]
+              targets:
+                - index: [ 'k_proj', 'v_proj', 'q_proj', 'out_proj' ]
+                  lora:
+                    rank: 4
+                    alpha: 1
+                    dropout: 0.
+            - index: [ 'mlp' ]
+              targets:
+                - index: [ 'fc1', 'fc2' ]
+                  lora:
+                    rank: 4
+                    alpha: 1
+                    dropout: 0.

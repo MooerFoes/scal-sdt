@@ -6,13 +6,16 @@ import click
 import torch
 from typing.io import IO
 
+from modules import config
 from modules.convert.common import DTYPE_CHOICES, load_state_dict, DTYPE_MAP
+from modules.convert.sd_to_diffusers import convert_ldm_unet_checkpoint, create_unet_diffusers_config
+from modules.model import get_ldm_config
 
 
 def infer_format_from_path(path: Path):
     suffix = path.suffix[1:].lower()
 
-    if suffix == "ckpt":
+    if suffix == "ckpt" or suffix == "pt":
         return "pt"
     elif suffix == "safetensors":
         return "safetensors"
@@ -20,7 +23,33 @@ def infer_format_from_path(path: Path):
     return None
 
 
-@click.command()
+def check_overwrite(path: Path, overwrite: bool):
+    if path.exists() and not overwrite:
+        raise FileExistsError(f"{path} already exists")
+
+
+@click.group()
+def cli():
+    pass
+
+
+def save_state_dict(state, path, format):
+    if format == "pt":
+        with open(path, 'wb') as f:
+            torch.save(state, f)
+    elif format == "safetensors":
+        try:
+            from safetensors.torch import save_file
+        except ImportError:
+            raise ModuleNotFoundError('In order to use safetensors, run "pip install safetensors"')
+
+        state = {k: v.contiguous().to_dense() for k, v in state.items()}
+        save_file(state, path)
+    else:
+        raise ValueError(f'Invalid format "{format}"')
+
+
+@cli.command()
 @click.argument("checkpoint", type=click.File("rb"))
 @click.argument("output", type=click.Path(path_type=Path))
 @click.option("--text-encoder",
@@ -55,23 +84,22 @@ def infer_format_from_path(path: Path):
 @click.option("--ema",
               is_flag=True,
               help="Use EMA weights.")
-def main(checkpoint: IO[bytes],
-         output: Path,
-         text_encoder: bool,
-         vae: Optional[IO[bytes]],
-         unet_dtype: str,
-         vae_dtype: str,
-         text_encoder_dtype: str,
-         overwrite: bool,
-         map_location: str,
-         format: Optional[str],
-         ema: bool):
+def prune(checkpoint: IO[bytes],
+          output: Path,
+          text_encoder: bool,
+          vae: Optional[IO[bytes]],
+          unet_dtype: str,
+          vae_dtype: str,
+          text_encoder_dtype: str,
+          overwrite: bool,
+          map_location: str,
+          format: Optional[str],
+          ema: bool):
     """Prune a SCAL-SDT checkpoint.
 
     CHECKPOINT: Path to the SCAL-SDT checkpoint.
     OUTPUT: Output path."""
-    if output.exists() and not overwrite:
-        raise FileExistsError(f"{output} already exists")
+    check_overwrite(output, overwrite)
 
     if format is None:
         infered_format = infer_format_from_path(output)
@@ -104,20 +132,60 @@ def main(checkpoint: IO[bytes],
     # Put together new checkpoint
     state_dict = {**unet_dict, **vae_dict, **text_encoder_dict}
 
-    if format == "pt":
-        with open(output, 'wb') as f:
-            torch.save(state_dict, f)
-    elif format == "safetensors":
-        try:
-            from safetensors.torch import save_file
-        except ImportError:
-            raise ModuleNotFoundError('In order to use safetensors, run "pip install safetensors"')
+    save_state_dict(state_dict, output, format)
 
-        state_dict = {k: v.contiguous().to_dense() for k, v in state_dict.items()}
-        save_file(state_dict, output)
-    else:
-        raise ValueError(f'Invalid format "{format}"')
+
+@cli.command("lora")
+@click.argument("checkpoint", type=click.File("rb"))
+@click.argument("output", type=click.Path(path_type=Path))
+@click.option("--overwrite",
+              is_flag=True,
+              help="Whether to overwrite output")
+@click.option("--map-location",
+              type=str,
+              default="cpu",
+              help='Where the checkpoint is loaded to. Could be "cpu" or "cuda".')
+@click.option("--format",
+              type=click.Choice(["pt", "safetensors"]),
+              default=None,
+              help='Save in which format. If not specified, infered from output path extension.')
+def extract_lora(checkpoint: IO[bytes],
+                 output: Path,
+                 overwrite: bool,
+                 map_location: str,
+                 format: Optional[str]):
+    check_overwrite(output, overwrite)
+
+    if format is None:
+        infered_format = infer_format_from_path(output)
+        assert infered_format is not None, "Must specify a known extension or format"
+
+        format = infered_format
+
+    state_dict = load_state_dict(checkpoint, map_location)
+
+    unet_state = convert_ldm_unet_checkpoint(state_dict,
+                                             create_unet_diffusers_config(get_ldm_config(config.default().ldm_config)))
+
+    def to_kohya_format(key: str):
+        return key.replace(".", "_") \
+            .replace("_lora_A", ".lora_down.weight") \
+            .replace("_lora_B", ".lora_up.weight")
+
+    unet_state = {
+        "lora_unet_" + to_kohya_format(k): v
+        for k, v in unet_state.items() if "lora" in k
+    }
+
+    text_encoder_state = {
+        to_kohya_format(k).replace("cond_stage_model_transformer_text_model", "lora_te_text_model"): v
+        for k, v in state_dict.items() if "lora" in k and k.startswith("cond_stage_model")
+    }
+
+    state_dict = {**text_encoder_state, **unet_state}
+
+    save_state_dict(state_dict, output, format)
 
 
 if __name__ == '__main__':
-    main()
+    cli()

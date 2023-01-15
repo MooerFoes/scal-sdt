@@ -30,3 +30,4 @@ dependencies:
       - bitsandbytes~=0.35
       - torch-ema==0.3
       - git+https://github.com/CCRcmcpe/diffusers.git
+      - loralib~=0.1
