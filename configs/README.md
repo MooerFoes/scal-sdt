@@ -2,20 +2,18 @@
 
 ## Remarks
 
-SCAL-SDT exposes a lot of implementation details by design to maximize customizability.
-
-PyTorch Lightning is used as underlying framework, checking its docs will be helpful.
-
-Link to docs of PyTorch Lightning will be mentioned below.
+SCAL-SDT exposes implementation details by design. PyTorch Lightning is used as the underlying framework,
+checking its docs will be helpful.
 
 Defaults are at `configs/__reserved_default__.yaml`.
 
 ## Important Entries
 
-`model`: Path to a saved diffusers SD pipeline or a HuggingFace model identifier.
-Only Diffusers format is currently supported, i.e. you cannot directly put a original SD checkpoint.
+`model`: Path to a saved diffusers SD pipeline, or a original LDM checkpoint (".ckpt").
 
 `loggers.wandb`: If you don't want to use WandB, you should remove this entry, or disable wandb by:
+
+`optim_target`: The optimization (unfreeze) configuration to use, such as `'lora'` or `'custom_diffusion'`.
 
 ```shell
 wandb disabled
