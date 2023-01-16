@@ -200,7 +200,7 @@ class StableDiffusionModel(pl.LightningModule):
 
         if config.gradient_checkpointing:
             unet.enable_gradient_checkpointing()
-            if hasattr(self.config.optim_target, "text_encoder"):
+            if hasattr(config.optim_target, "text_encoder"):
                 text_encoder.gradient_checkpointing_enable()
 
         if config.xformers:
