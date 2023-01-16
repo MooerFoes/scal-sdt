@@ -1,5 +1,6 @@
 import logging
 import math
+import warnings
 from os import PathLike
 from pathlib import Path
 from typing import Any, Optional, Callable
@@ -177,6 +178,9 @@ def config_module(config: DictConfig, module: nn.Module):
     for param in params_to_optimize:
         param.requires_grad = True
 
+    if len(list(module.parameters())) != len(params_to_optimize):
+        warnings.filterwarnings("ignore", message="None of the inputs have requires_grad=True. Gradients will be None")
+
     return params_to_optimize
 
 
@@ -193,6 +197,8 @@ class StableDiffusionModel(pl.LightningModule):
         super().__init__()
 
         vae.requires_grad_(False)
+        vae.eval()
+
         text_encoder.requires_grad_(False)
         unet.requires_grad_(False)
 
@@ -200,8 +206,7 @@ class StableDiffusionModel(pl.LightningModule):
 
         if config.gradient_checkpointing:
             unet.enable_gradient_checkpointing()
-            if hasattr(config.optim_target, "text_encoder"):
-                text_encoder.gradient_checkpointing_enable()
+            text_encoder.gradient_checkpointing_enable()
 
         if config.xformers:
             unet.set_use_memory_efficient_attention_xformers(True)
@@ -248,9 +253,13 @@ class StableDiffusionModel(pl.LightningModule):
 
         if (unet_config := config.get("unet")) is not None:
             params_to_optimize.extend(config_module(unet_config, unet))
+        else:
+            unet.eval()
 
         if (te_config := config.get("text_encoder")) is not None:
             params_to_optimize.extend(config_module(te_config, text_encoder))
+        else:
+            text_encoder.eval()
 
         return params_to_optimize
 
