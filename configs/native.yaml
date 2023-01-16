@@ -9,9 +9,8 @@ project: 'SCAL-SDT'
 
 batch_size: 4
 seed: 114514
-train_text_encoder: false
 clip_stop_at_layer: 2
-pad_tokens: true
+gradient_checkpointing: true
 
 data:
   resolution: 512
@@ -45,14 +44,14 @@ checkpoint:
   mode: 'max'
 
 trainer:
-  # strategy: 'ddp_find_unused_parameters_false'
-  # num_nodes: 2
   accelerator: 'gpu'
-  devices: -1
-  auto_select_gpus: true
+  # strategy: 'ddp_find_unused_parameters_false'
+  # num_nodes: 1
+  # devices: -1
+  devices: [ 0 ]
   precision: 16
   log_every_n_steps: 1
-  max_epochs: 100
+  max_epochs: &max_epochs 100
 
 prior_preservation:
   enabled: false
@@ -81,11 +80,6 @@ optimizer:
   lr_scheduler:
     name: torch.optim.lr_scheduler.CosineAnnealingLR
     params:
-      T_max: 100
+      T_max: *max_epochs
       eta_min: 2e-7
       last_epoch: -1
-    warmup:
-      enabled: true
-      init_lr: 1e-8
-      steps: 50
-      strategy: 'linear'

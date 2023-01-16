@@ -7,10 +7,11 @@ model: 'path/to/model' # Or HuggingFace model identifier
 output_dir: 'output'
 project: 'SCAL-SDT'
 
-batch_size: 2
+batch_size: 4
 seed: 114514
 clip_stop_at_layer: 2
 gradient_checkpointing: true
+optim_target: 'lora'
 
 data:
   resolution: 512
@@ -18,18 +19,8 @@ data:
   concepts:
     # You can add more concepts
     - instance_set:
-        path: 'example/data/instance'
-        prompt: 'sks 1girl'
-      class_set:
-        path: 'example/data/class'
-        prompt: '1girl'
-        auto_generate:
-          enabled: true
-          negative_prompt: 'lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry'
-          steps: 28
-          cfg_scale: 11
-          num_target: 100
-          batch_size: 1
+        path: 'example/data'
+        prompt: '{TXT_PROMPT}'
 
 sampling:
   interval_steps: 50
@@ -55,18 +46,19 @@ checkpoint:
 
 trainer:
   accelerator: 'gpu'
+  # strategy: 'ddp_find_unused_parameters_false'
+  # num_nodes: 1
+  # devices: -1
   devices: [ 0 ]
   precision: 16
   log_every_n_steps: 1
   max_epochs: 100
 
-# How to enable "DreamBooth"? Here's another fancy name for it.
 prior_preservation:
-  enabled: true
-  prior_loss_weight: 1.0
+  enabled: false
 
 aspect_ratio_bucket:
-  enabled: false
+  enabled: true
   debug: false
 
 loggers:
@@ -76,9 +68,9 @@ loggers:
     remove_ckpt_after_upload: false
 
 optimizer:
-  name: bitsandbytes.optim.AdamW8bit
+  name: torch.optim.AdamW
   params:
-    lr: 2e-6
+    lr: 5e-4
     beta1: 0.9
     beta2: 0.999
     weight_decay: 2e-1

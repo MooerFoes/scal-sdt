@@ -77,10 +77,11 @@ optimizer:
     enabled: true
     method: 'sqrt'
   lr_scheduler:
-    name: torch.optim.lr_scheduler.CosineAnnealingWarmRestarts
-    params: ???
+    name: torch.optim.lr_scheduler.ConstantLR
+    params:
+      factor: 1.
     warmup:
-      enabled: true
+      enabled: false
       init_lr: 7e-8
       steps: 100
       strategy: 'linear'
