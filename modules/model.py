@@ -184,6 +184,13 @@ def config_module(config: DictConfig, module: nn.Module):
     return params_to_optimize
 
 
+def raise_if_nan(x: torch.Tensor, name: str):
+    if not torch.any(torch.isnan(x)):
+        return
+
+    raise Exception(f"NaN element discovered in {name}")
+
+
 class StableDiffusionModel(pl.LightningModule):
     unet_ema: Optional[ExponentialMovingAverage] = None
 
@@ -309,6 +316,8 @@ class StableDiffusionModel(pl.LightningModule):
         else:
             latents = self._vae_encode(batch["images"]).to(self.unet.dtype)
 
+        raise_if_nan(latents, "VAE output")
+
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents)
         bsz = latents.shape[0]
@@ -326,8 +335,12 @@ class StableDiffusionModel(pl.LightningModule):
         else:
             conds = self._get_embedding(batch["token_ids"]).to(self.unet.dtype)
 
+        raise_if_nan(conds, "text encoder output")
+
         # Predict the noise residual
         noise_pred = self.unet(noisy_latents, timesteps, conds).sample
+
+        raise_if_nan(noise_pred, "UNet output")
 
         if self.config.prior_preservation.enabled:
             # Chunk the noise and noise_pred into two parts and compute the loss on each part separately.
