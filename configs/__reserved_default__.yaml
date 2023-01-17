@@ -78,8 +78,7 @@ optimizer:
     method: 'sqrt'
   lr_scheduler:
     name: torch.optim.lr_scheduler.ConstantLR
-    params:
-      factor: 1.
+    params: { }
     warmup:
       enabled: false
       init_lr: 7e-8
