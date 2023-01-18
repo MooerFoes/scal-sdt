@@ -85,7 +85,7 @@ def main(model: Path,
     ldm_config = None
 
     def load_components(path: Path):
-        if path.suffix.lower() == ".ckpt":
+        if path.is_file():
             nonlocal ldm_config
             if ldm_config is None:
                 ldm_config = get_ldm_config(config.default().ldm_config)

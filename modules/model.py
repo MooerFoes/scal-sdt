@@ -237,7 +237,7 @@ class StableDiffusionModel(pl.LightningModule):
 
     @classmethod
     def from_config(cls, config: DictConfig):
-        if (model_path := Path(config.model)).suffix.lower() == ".ckpt":
+        if (model_path := Path(config.model)).is_file():
             unet, vae, text_encoder, tokenizer, noise_scheduler = \
                 load_ldm_checkpoint(model_path, get_ldm_config(config.ldm_config), config.vae, config.tokenizer)
         else:
