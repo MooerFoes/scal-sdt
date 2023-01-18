@@ -4,7 +4,7 @@ from diffusers import (
 from diffusers.pipelines.latent_diffusion.pipeline_latent_diffusion import LDMBertConfig, LDMBertModel
 from transformers import CLIPTextModel
 
-from modules.convert.common import load_state_dict
+from modules.utils import load_state_dict
 
 
 def shave_segments(path, n_shave_prefix_segments=1):

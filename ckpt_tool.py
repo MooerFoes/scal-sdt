@@ -3,29 +3,12 @@ from pathlib import Path
 from typing import Optional
 
 import click
-import torch
-from typing.io import IO
 
 from modules import config
-from modules.convert.common import DTYPE_CHOICES, load_state_dict, DTYPE_MAP
+from modules.convert.common import DTYPE_CHOICES, DTYPE_MAP
 from modules.convert.sd_to_diffusers import convert_ldm_unet_checkpoint, create_unet_diffusers_config
 from modules.model import get_ldm_config
-
-
-def infer_format_from_path(path: Path):
-    suffix = path.suffix[1:].lower()
-
-    if suffix == "ckpt" or suffix == "pt":
-        return "pt"
-    elif suffix == "safetensors":
-        return "safetensors"
-
-    return None
-
-
-def check_overwrite(path: Path, overwrite: bool):
-    if path.exists() and not overwrite:
-        raise FileExistsError(f"{path} already exists")
+from modules.utils import check_overwrite, save_state_dict, load_state_dict, SUPPORTED_FORMATS
 
 
 @click.group()
@@ -33,30 +16,14 @@ def cli():
     pass
 
 
-def save_state_dict(state, path, format):
-    if format == "pt":
-        with open(path, 'wb') as f:
-            torch.save(state, f)
-    elif format == "safetensors":
-        try:
-            from safetensors.torch import save_file
-        except ImportError:
-            raise ModuleNotFoundError('In order to use safetensors, run "pip install safetensors"')
-
-        state = {k: v.contiguous().to_dense() for k, v in state.items()}
-        save_file(state, path)
-    else:
-        raise ValueError(f'Invalid format "{format}"')
-
-
 @cli.command()
-@click.argument("checkpoint", type=click.File("rb"))
+@click.argument("checkpoint", type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path))
 @click.argument("output", type=click.Path(path_type=Path))
 @click.option("--text-encoder",
               is_flag=True,
               help="Whether to include text encoder weights.")
 @click.option("--vae",
-              type=click.File("rb"),
+              type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
               help="Path to VAE ckpt.")
 @click.option("--unet-dtype",
               type=DTYPE_CHOICES,
@@ -78,16 +45,16 @@ def save_state_dict(state, path, format):
               default="cpu",
               help='Where the checkpoint is loaded to. Could be "cpu" or "cuda".')
 @click.option("--format",
-              type=click.Choice(["pt", "safetensors"]),
+              type=click.Choice(SUPPORTED_FORMATS),
               default=None,
               help='Save in which format. If not specified, infered from output path extension.')
 @click.option("--ema",
               is_flag=True,
               help="Use EMA weights.")
-def prune(checkpoint: IO[bytes],
+def prune(checkpoint: Path,
           output: Path,
           text_encoder: bool,
-          vae: Optional[IO[bytes]],
+          vae: Optional[Path],
           unet_dtype: str,
           vae_dtype: str,
           text_encoder_dtype: str,
@@ -100,12 +67,6 @@ def prune(checkpoint: IO[bytes],
     CHECKPOINT: Path to the SCAL-SDT checkpoint.
     OUTPUT: Output path."""
     check_overwrite(output, overwrite)
-
-    if format is None:
-        infered_format = infer_format_from_path(output)
-        assert infered_format is not None, "Must specify a known extension or format"
-
-        format = infered_format
 
     state_dict = load_state_dict(checkpoint, map_location)
 
@@ -136,7 +97,7 @@ def prune(checkpoint: IO[bytes],
 
 
 @cli.command("lora")
-@click.argument("checkpoint", type=click.File("rb"))
+@click.argument("checkpoint", type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path))
 @click.argument("output", type=click.Path(path_type=Path))
 @click.option("--overwrite",
               is_flag=True,
@@ -146,21 +107,15 @@ def prune(checkpoint: IO[bytes],
               default="cpu",
               help='Where the checkpoint is loaded to. Could be "cpu" or "cuda".')
 @click.option("--format",
-              type=click.Choice(["pt", "safetensors"]),
+              type=click.Choice(SUPPORTED_FORMATS),
               default=None,
               help='Save in which format. If not specified, infered from output path extension.')
-def extract_lora(checkpoint: IO[bytes],
+def extract_lora(checkpoint: Path,
                  output: Path,
                  overwrite: bool,
                  map_location: str,
                  format: Optional[str]):
     check_overwrite(output, overwrite)
-
-    if format is None:
-        infered_format = infer_format_from_path(output)
-        assert infered_format is not None, "Must specify a known extension or format"
-
-        format = infered_format
 
     state_dict = load_state_dict(checkpoint, map_location)
 

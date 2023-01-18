@@ -18,11 +18,10 @@ from transformers import CLIPTokenizer, CLIPTextModel
 
 from modules.clip import hook_forward
 from modules.config import OPTIM_TARGETS_DIR
-from modules.convert.common import load_state_dict
 from modules.custom_embeddings import CustomEmbeddingsHook
 from modules.dataset import get_dataset, get_sampler, collate_fn
 from modules.lora import get_lora
-from modules.utils import get_class, physical_core_count
+from modules.utils import get_class, physical_core_count, load_state_dict
 
 logger = logging.getLogger()
 
@@ -86,7 +85,7 @@ def load_df_pipeline(path: str, vae: Optional[str] = None, tokenizer: Optional[s
     return unet, vae, text_encoder, tokenizer, noise_scheduler
 
 
-def load_ldm_checkpoint(path: str | PathLike, config: DictConfig, vae_path: Optional[str | PathLike] = None,
+def load_ldm_checkpoint(path: Path, config: DictConfig, vae_path: Optional[str | PathLike] = None,
                         tokenizer: Optional[str] = None):
     state_dict = load_state_dict(path)
 
@@ -137,24 +136,30 @@ def set_submodule(module: nn.Module, name: str, sub: nn.Module):
     module.__setattr__(segments[-1], sub)
 
 
-def apply_module_config(modules: nn.Module, module_configs: ListConfig,
-                        fn: Callable[[nn.Module, DictConfig], nn.Module], recursive=True):
+def apply_module_config(module: nn.Module, module_configs: ListConfig,
+                        fn: Callable[[nn.Module, DictConfig, str], None], recursive=True, path=""):
     for module_config in module_configs:
-        if module_config.get("index") is None:
-            for name, module in modules.named_children():
-                if module == modules:
+        index = module_config.get("index")
+        targets = module_config.get("targets")
+
+        def invoke_on_submodule(_submodule: nn.Module, _module_path: str):
+            _path = _module_path if path == "" else f"{path}.{_module_path}"
+            if recursive and targets is not None:
+                apply_module_config(_submodule, module_config.targets, fn,
+                                    path=_path)
+            else:
+                fn(_submodule, module_config, _path)
+
+        if index is None:
+            for name, submodule in module.named_children():
+                if submodule == module:
                     continue
 
-                if recursive and module_config.get("targets") is not None:
-                    apply_module_config(module, module_config.targets, fn)
-                else:
-                    set_submodule(modules, name, fn(module, module_config))
+                invoke_on_submodule(submodule, name)
         else:
-            for module_index in module_config.index:
-                if recursive and module_config.get("targets") is not None:
-                    apply_module_config(modules.get_submodule(module_index), module_config.targets, fn)
-                else:
-                    set_submodule(modules, module_index, fn(modules.get_submodule(module_index), module_config))
+            for module_path in index:
+                submodule = module.get_submodule(module_path)
+                invoke_on_submodule(submodule, module_path)
 
 
 def config_module(config: DictConfig, module: nn.Module):
@@ -164,14 +169,14 @@ def config_module(config: DictConfig, module: nn.Module):
 
     params_to_optimize = list[nn.Parameter]()
 
-    def apply_innermost(module: nn.Module, config: DictConfig):
-        if (lora_config := config.get("lora")) is not None:
-            assert isinstance(module, nn.Linear) or isinstance(module, nn.Conv2d)
-            module = get_lora(module, **lora_config)
-            params_to_optimize.extend([module.lora_A, module.lora_B])
+    def apply_innermost(submodule: nn.Module, submodule_config: DictConfig, module_path: str):
+        if (lora_config := submodule_config.get("lora")) is not None:
+            assert isinstance(submodule, nn.Linear) or isinstance(submodule, nn.Conv2d)
+            submodule = get_lora(submodule, **lora_config)
+            set_submodule(module, module_path, submodule)
+            params_to_optimize.extend([submodule.lora_A, submodule.lora_B])
         else:
-            params_to_optimize.extend(module.parameters())
-        return module
+            params_to_optimize.extend(submodule.parameters())
 
     apply_module_config(module, config.targets, apply_innermost)
 
