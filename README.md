@@ -43,7 +43,7 @@ pip install -r requirements.txt
 **Documentation**: `configs/README.md`.
 ([Link](https://github.com/CCRcmcpe/scal-sdt/blob/main/configs/README.md))
 
-`configs/native.yaml` (for native training) and `configs/dreambooth.yaml` (for DreamBooth) provided as examples.
+In `configs`, `native.yaml` (for so-called native training), `dreambooth.yaml`, `lora.yaml` provided as examples.
 
 ### Run
 
@@ -64,17 +64,16 @@ python train.py --config configs/your_config.yaml
 
 [WebUI](https://github.com/AUTOMATIC1111/stable-diffusion-webui)
 may not directly load the checkpoints due to the safe loading mechanism.
-To solve this issue and reduce checkpoint size, prune and convert the checkpoint:
+To solve this issue and reduce checkpoint size:
 
 ```shell
-python ckpt_tool.py prune INPUT_CKPT OUTPUT_CKPT --no-text-encoder --unet-dtype fp16
+python ckpt_tool.py prune INPUT_CKPT OUTPUT_CKPT --unet-dtype fp16
 ```
 
-`--no-text-encoder --unet-dtype fp16` results a ~2GB checkpoint, containing fp16 UNet and fp32 VAE weights, WebUI
-supports loading that. For further reducing checkpoint size to ~1.6GB if target clients have external VAE already,
-add `--no-vae` to remove VAE weights from checkpoint, leaving fp16 UNet weights only.
+Results a ~1.6GB checkpoint which can be loaded by WebUI, containing fp16 UNet.
 
-If you are not using WebUI and having issues, remove `--no-text-encoder`.
+If you are not using WebUI and having issues, add `--text-encoder` and `--vae`
+and remove `--unet-dtype fp16` to get a full checkpoint.
 
 ### TPUs or other computing units?
 
