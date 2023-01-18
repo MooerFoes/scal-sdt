@@ -10,6 +10,7 @@ from torch import nn
 from typing.io import IO
 
 from modules import config
+from modules.convert.common import DTYPE_MAP, DTYPE_CHOICES
 from modules.model import get_ldm_config, load_ldm_checkpoint, load_df_pipeline, apply_module_config
 from modules.utils import check_overwrite, SUPPORTED_FORMATS, save_state_dict
 
@@ -34,7 +35,7 @@ def lora_approx(delta_w: torch.Tensor, rank: int):
     """
     Apply low-rank approximation to a dense layer weight difference using SVD,
     so for input x, x @ w + x @ u @ v_t is close to x @ w + x @ delta_w.
-    (u, v_t) corresponds to (lora_down, lora_up).
+    (v_t, u) corresponds to (lora_down, lora_up).
     """
     u, s, v_t = torch.linalg.svd(delta_w)
 
@@ -43,7 +44,7 @@ def lora_approx(delta_w: torch.Tensor, rank: int):
     u = u @ torch.diag(s)
     v_t = v_t[:rank, :]
 
-    return u, v_t
+    return v_t, u
 
 
 @click.command()
@@ -61,6 +62,10 @@ def lora_approx(delta_w: torch.Tensor, rank: int):
               type=str,
               default="cpu",
               help='Tensors loading location. Possible choices are "cpu" or "cuda".')
+@click.option("--dtype",
+              type=DTYPE_CHOICES,
+              default="fp16",
+              help='State dict saving format. If not specified, infered from output path extension.')
 @click.option("--format",
               type=click.Choice([SUPPORTED_FORMATS]),
               default=None,
@@ -72,6 +77,7 @@ def main(model: Path,
          layer_spec: IO[str],
          overwrite: bool,
          device: str,
+         dtype: str,
          format: Optional[str]):
     """
     Extract difference between a full model and its base given a layer specification, then compute a low-rank approximation using SVD.
@@ -121,7 +127,7 @@ def main(model: Path,
             submodules[to_kohya_format(p)].append(m.to(device))
 
         apply_module_config(module, module_config, add_module)
-        apply_module_config(module, module_config, add_base_module)
+        apply_module_config(module_base, module_config, add_base_module)
 
     logger.info("Layer specification loaded and locked")
 
@@ -136,23 +142,23 @@ def main(model: Path,
         if isinstance(submodule, nn.Linear):
             (down, up), t = timeit(lambda: lora_approx(
                 submodule.weight - submodule_base.weight, lora_config.rank))
-        elif isinstance(submodule, nn.Conv2d):
+        elif isinstance(submodule, nn.Conv2d) and submodule.kernel_size == (1, 1):
             (down, up), t = timeit(lambda: lora_approx(
                 (submodule.weight - submodule_base.weight).squeeze(), lora_config.rank))
-            down = down.unsqueeze(2).unsqueeze(3)
-            up = up.unsqueeze(2).unsqueeze(3)
         else:
-            raise Exception("Only Linear and Conv2d supports LoRA.")
+            raise Exception("Only Linear and Conv2d(kernel_size=(1,1)) supports LoRA.")
 
         svd_total_time += t
 
-        down *= lora_config.alpha / lora_config.rank
-        up *= lora_config.alpha / lora_config.rank
+        # down *= lora_config.rank / lora_config.alpha
+        # up *= lora_config.rank / lora_config.alpha
 
         state[f"{submodule_path}.lora_down.weight"] = down
         state[f"{submodule_path}.lora_up.weight"] = up
 
     logger.info(f"All SVD completed, total time {svd_total_time}s")
+
+    state = {k: v.to(DTYPE_MAP[dtype]) for k, v in state.items()}
 
     save_state_dict(state, output, format, overwrite)
 
