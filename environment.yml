@@ -1,7 +1,7 @@
 name: ssdt
 channels:
   - pytorch
-  - xformers/label/dev
+  - xformers
   - nvidia/label/cuda-11.6.2
   - huggingface
   - conda-forge
@@ -23,11 +23,11 @@ dependencies:
   - ftfy
   - accelerate
   - psutil
-  - xformers=0.0.16.dev419+git.6a988dd
+  - xformers=0.0.16rc425
   - wandb
   - pip:
-      - safetensors~=0.2
-      - bitsandbytes~=0.35
+      - safetensors==0.2
+      - bitsandbytes==0.35
       - torch-ema==0.3
       - git+https://github.com/CCRcmcpe/diffusers.git
-      - loralib~=0.1
+      - loralib==0.1
