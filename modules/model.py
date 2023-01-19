@@ -1,7 +1,6 @@
 import logging
 import math
 import warnings
-from os import PathLike
 from pathlib import Path
 from typing import Any, Optional, Callable
 
@@ -245,7 +244,10 @@ class StableDiffusionModel(pl.LightningModule):
             info = [f"{k}: {v.shape[0]}" for k, v in embs.items()]
             logger.info(f"Loaded {len(embs)} custom embeddings: {info}")
 
-        config.optim_target = OmegaConf.load(OPTIM_TARGETS_DIR / (config.optim_target + ".yaml"))
+        if isinstance(config.optim_target, str):
+            config.optim_target = OmegaConf.load(OPTIM_TARGETS_DIR / (config.optim_target + ".yaml"))
+        else:
+            assert isinstance(config.optim_target, dict)
 
         return cls(config, unet, vae, text_encoder, tokenizer, noise_scheduler)
 
