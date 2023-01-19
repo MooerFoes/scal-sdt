@@ -4,10 +4,9 @@ from typing import Optional
 import click
 from diffusers import StableDiffusionPipeline
 
-from modules.convert.common import DTYPE_CHOICES, DTYPE_MAP
-from modules.model import get_ldm_config, load_ldm_checkpoint
-
-DEFAULT_CONFIG = 'https://raw.githubusercontent.com/CompVis/stable-diffusion/main/configs/stable-diffusion/v1-inference.yaml'
+from modules.config import get_ldm_config
+from modules.model import load_ldm_checkpoint
+from modules.utils import DTYPE_MAP
 
 
 @click.command()
@@ -15,10 +14,10 @@ DEFAULT_CONFIG = 'https://raw.githubusercontent.com/CompVis/stable-diffusion/mai
 @click.argument("output", type=click.Path(path_type=Path))
 @click.option("--config",
               type=str,
-              default=DEFAULT_CONFIG,
-              help="Link or path to the LDM config. (Default: v1-inference.yaml)")
+              default=None,
+              help="Link or path to the LDM config.")
 @click.option("--unet-dtype",
-              type=DTYPE_CHOICES,
+              type=click.Choice(DTYPE_MAP.keys()),
               default="fp32",
               help="Save unet weights in this data type.")
 @click.option("--vae",
@@ -35,7 +34,7 @@ DEFAULT_CONFIG = 'https://raw.githubusercontent.com/CompVis/stable-diffusion/mai
 @click.option("--overwrite", is_flag=True)
 def main(checkpoint: Path,
          output: Path,
-         config: str,
+         ldm_config_path: Optional[str],
          unet_dtype: str,
          vae: Optional[Path],
          # vae_dtype: str,
@@ -48,9 +47,9 @@ def main(checkpoint: Path,
     if output.exists() and not overwrite:
         raise FileExistsError(f'"{output}" already exists')
 
-    config = get_ldm_config(config)
+    ldm_config = get_ldm_config(ldm_config_path)
 
-    unet, vae, text_encoder, tokenizer, scheduler = load_ldm_checkpoint(checkpoint, config, vae)
+    unet, vae, text_encoder, tokenizer, scheduler = load_ldm_checkpoint(checkpoint, ldm_config, vae)
 
     unet.to(DTYPE_MAP[unet_dtype])
     # vae.to(DTYPE_MAP[vae_dtype])

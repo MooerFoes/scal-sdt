@@ -17,7 +17,7 @@ from torch_ema import ExponentialMovingAverage
 from transformers import CLIPTokenizer, CLIPTextModel
 
 from modules.clip import hook_forward
-from modules.config import OPTIM_TARGETS_DIR
+from modules.config import OPTIM_TARGETS_DIR, get_ldm_config
 from modules.custom_embeddings import CustomEmbeddingsHook
 from modules.dataset import get_dataset, get_sampler, collate_fn
 from modules.lora import get_lora
@@ -85,7 +85,7 @@ def load_df_pipeline(path: str, vae: Optional[str] = None, tokenizer: Optional[s
     return unet, vae, text_encoder, tokenizer, noise_scheduler
 
 
-def load_ldm_checkpoint(path: Path, config: DictConfig, vae_path: Optional[str | PathLike] = None,
+def load_ldm_checkpoint(path: Path, config: DictConfig, vae_path: Optional[Path] = None,
                         tokenizer: Optional[str] = None):
     state_dict = load_state_dict(path)
 
@@ -116,18 +116,12 @@ def load_ldm_checkpoint(path: Path, config: DictConfig, vae_path: Optional[str |
     return unet, vae, text_encoder, tokenizer, noise_scheduler
 
 
-def get_ldm_config(link_or_path: str):
-    if link_or_path.startswith("http://") or link_or_path.startswith("https://"):
-        import requests
-        with requests.Session() as session:
-            config_str = session.get(link_or_path).content.decode("utf-8")
-    elif Path(link_or_path).exists():
-        with open(link_or_path, "r") as f:
-            config_str = f.read()
+def load_components(name: str, vae: Optional[str] = None, tokenizer: Optional[str] = None,
+                    ldm_config_path: Optional[str] = None):
+    if (path := Path(name)).is_file():
+        return load_ldm_checkpoint(path, get_ldm_config(ldm_config_path), Path(vae) if vae is not None else None, tokenizer)
     else:
-        raise ValueError(f'"{link_or_path}" is not a valid link or path')
-
-    return OmegaConf.create(config_str)
+        return load_df_pipeline(name, vae, tokenizer)
 
 
 def set_submodule(module: nn.Module, name: str, sub: nn.Module):
@@ -237,12 +231,8 @@ class StableDiffusionModel(pl.LightningModule):
 
     @classmethod
     def from_config(cls, config: DictConfig):
-        if (model_path := Path(config.model)).is_file():
-            unet, vae, text_encoder, tokenizer, noise_scheduler = \
-                load_ldm_checkpoint(model_path, get_ldm_config(config.ldm_config), config.vae, config.tokenizer)
-        else:
-            unet, vae, text_encoder, tokenizer, noise_scheduler = \
-                load_df_pipeline(config.model, config.vae, config.tokenizer)
+        unet, vae, text_encoder, tokenizer, noise_scheduler = \
+            load_components(config.model, config.vae, config.tokenizer, config.ldm_config)
 
         logger.info("Weights loaded")
 

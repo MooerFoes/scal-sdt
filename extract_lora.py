@@ -1,7 +1,6 @@
 import logging
-import time
 from pathlib import Path
-from typing import Optional, Callable, Any
+from typing import Optional
 
 import click
 import torch.linalg
@@ -10,25 +9,11 @@ from torch import nn
 from typing.io import IO
 
 from modules import config
-from modules.convert.common import DTYPE_MAP, DTYPE_CHOICES
-from modules.model import get_ldm_config, load_ldm_checkpoint, load_df_pipeline, apply_module_config
-from modules.utils import check_overwrite, SUPPORTED_FORMATS, save_state_dict
+from modules.config import get_ldm_config
+from modules.model import load_ldm_checkpoint, load_df_pipeline, apply_module_config
+from modules.utils import check_overwrite, SUPPORTED_FORMATS, save_state_dict, DTYPE_MAP, try_then_default, timeit
 
 logger = logging.getLogger("lora-approx")
-
-
-def try_then_default(f: Callable[[], Any], default=None):
-    try:
-        return f()
-    except:
-        return default
-
-
-def timeit(f: Callable[[], Any]):
-    start = time.perf_counter()
-    result = f()
-    t = time.perf_counter() - start
-    return result, t
 
 
 def lora_approx(delta_w: torch.Tensor, rank: int):
@@ -63,11 +48,11 @@ def lora_approx(delta_w: torch.Tensor, rank: int):
               default="cpu",
               help='Tensors loading location. Possible choices are "cpu" or "cuda".')
 @click.option("--dtype",
-              type=DTYPE_CHOICES,
+              type=click.Choice(DTYPE_MAP.keys()),
               default="fp16",
               help='State dict saving format. If not specified, infered from output path extension.')
 @click.option("--format",
-              type=click.Choice([SUPPORTED_FORMATS]),
+              type=click.Choice(SUPPORTED_FORMATS),
               default=None,
               help='State dict saving format. If not specified, infered from output path extension.')
 @torch.no_grad()

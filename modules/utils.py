@@ -1,13 +1,34 @@
 import itertools
+import time
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Optional, Pattern
+from typing import Optional, Pattern, Callable, Any
 
 import PIL.Image as Image
 import torch
 
 STATE_DICT = dict[str, torch.Tensor]
 SUPPORTED_FORMATS = ["pt", "safetensors"]
+
+DTYPE_MAP = {
+    "fp16": torch.float16,
+    "fp32": torch.float32,
+    "bf16": torch.bfloat16
+}
+
+
+def get_string(link_or_path: str):
+    if link_or_path.startswith("http://") or link_or_path.startswith("https://"):
+        import requests
+        with requests.Session() as session:
+            content = session.get(link_or_path).content.decode("utf-8")
+    elif Path(link_or_path).exists():
+        with open(link_or_path, "r") as f:
+            content = f.read()
+    else:
+        raise ValueError(f'"{link_or_path}" is not a valid link or path')
+
+    return content
 
 
 def infer_model_from_state_dict(state: STATE_DICT):
@@ -100,3 +121,17 @@ def get_class(name: str):
 def physical_core_count():
     import psutil
     return psutil.cpu_count(logical=False)
+
+
+def try_then_default(f: Callable[[], Any], default=None):
+    try:
+        return f()
+    except:
+        return default
+
+
+def timeit(f: Callable[[], Any]):
+    start = time.perf_counter()
+    result = f()
+    t = time.perf_counter() - start
+    return result, t
