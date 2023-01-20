@@ -52,7 +52,8 @@ class CustomEmbeddingsHook:
         n_added = tokenizer.add_tokens(token_names)
         delta_embeddings = torch.cat(list(self.embs.values()), dim=0)
 
-        assert n_added == len(delta_embeddings), f"Unexpected number of tokens added: {n_added} vs {len(delta_embeddings)}. Try make the emb names are less nasty."
+        assert n_added == len(
+            delta_embeddings), f"Unexpected number of tokens added: {n_added} vs {len(delta_embeddings)}. Try make the emb names are less nasty."
 
         # append TI embeddings to CLIP embedding table
         emb_layer = clip.get_input_embeddings()

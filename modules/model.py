@@ -118,7 +118,8 @@ def load_ldm_checkpoint(path: Path, config: DictConfig, vae_path: Optional[Path]
 def load_components(name: str, vae: Optional[str] = None, tokenizer: Optional[str] = None,
                     ldm_config_path: Optional[str] = None):
     if (path := Path(name)).is_file():
-        return load_ldm_checkpoint(path, get_ldm_config(ldm_config_path), Path(vae) if vae is not None else None, tokenizer)
+        return load_ldm_checkpoint(path, get_ldm_config(ldm_config_path), Path(vae) if vae is not None else None,
+                                   tokenizer)
     else:
         return load_df_pipeline(name, vae, tokenizer)
 

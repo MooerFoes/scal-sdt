@@ -140,17 +140,21 @@ def extract_lora(checkpoint: Path,
     """
     check_overwrite(output, overwrite)
 
-    scale = None
-    run_config_path = checkpoint.parent / "config.yaml"
+    def get_scale():
+        if not unscale:
+            return None
 
-    if unscale:
+        run_config_path = checkpoint.parent / "config.yaml"
+
         if not run_config_path.exists():
             logger.warning("No corresponding config found for checkpoint, will not unscale")
+            return None
 
         optim_target = OmegaConf.load(run_config_path).optim_target
         lora_config = next(search_key(optim_target, "lora"))
-        scale = lora_config.alpha / lora_config.rank
+        return lora_config.alpha / lora_config.rank
 
+    scale = get_scale()
     dtype = DTYPE_MAP[dtype]
 
     state_dict = load_state_dict(checkpoint, map_location)
