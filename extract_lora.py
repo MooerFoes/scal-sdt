@@ -19,7 +19,7 @@ logger = logging.getLogger("lora-approx")
 def lora_approx(delta_w: torch.Tensor, rank: int):
     """
     Apply low-rank approximation to a dense layer weight difference using SVD,
-    so for input x, x @ w + x @ u @ v_t is close to x @ w + x @ delta_w.
+    so for input x, x @ w + x @ v_t @ u is close to x @ w + x @ delta_w.
     (v_t, u) corresponds to (lora_down, lora_up).
     """
     u, s, v_t = torch.linalg.svd(delta_w)
@@ -50,11 +50,14 @@ def lora_approx(delta_w: torch.Tensor, rank: int):
 @click.option("--dtype",
               type=click.Choice(DTYPE_MAP.keys()),
               default="fp16",
-              help='State dict saving format. If not specified, infered from output path extension.')
+              help='Save weights in this data type.')
 @click.option("--format",
               type=click.Choice(SUPPORTED_FORMATS),
               default=None,
               help='State dict saving format. If not specified, infered from output path extension.')
+@click.option("--scale",
+              is_flag=True,
+              help='Scale low rank tensor by alpha / rank if true.')
 @torch.no_grad()
 def main(model: Path,
          base_model: Path,
@@ -63,11 +66,16 @@ def main(model: Path,
          overwrite: bool,
          device: str,
          dtype: str,
-         format: Optional[str]):
+         format: Optional[str],
+         scale: bool):
     """
     Extract difference between a full model and its base given a layer specification, then compute a low-rank approximation using SVD.
 
+    Sav format is AddNet [1] compatible.
+
     If using --device cuda, SVD solving will be ~15x faster than --device cpu depending on your actual specs.
+
+    [1] AddNet: https://github.com/kohya-ss/sd-webui-additional-networks
     """
     check_overwrite(output, overwrite)
 
@@ -135,8 +143,9 @@ def main(model: Path,
 
         svd_total_time += t
 
-        # down *= lora_config.rank / lora_config.alpha
-        # up *= lora_config.rank / lora_config.alpha
+        if scale:
+            down *= lora_config.rank / lora_config.alpha
+            up *= lora_config.rank / lora_config.alpha
 
         state[f"{submodule_path}.lora_down.weight"] = down
         state[f"{submodule_path}.lora_up.weight"] = up
@@ -145,7 +154,7 @@ def main(model: Path,
 
     state = {k: v.to(DTYPE_MAP[dtype]) for k, v in state.items()}
 
-    save_state_dict(state, output, format, overwrite)
+    save_state_dict(state, output, format)
 
 
 if __name__ == '__main__':

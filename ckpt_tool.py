@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 import click
+import torch
 from omegaconf import OmegaConf
 from torch import nn
 
@@ -14,7 +15,7 @@ from modules.convert.diffusers_to_sd import convert_unet_state_dict
 from modules.convert.sd_to_diffusers import convert_ldm_unet_checkpoint, create_unet_diffusers_config
 from modules.model import load_components, apply_module_config
 from modules.utils import check_overwrite, save_state_dict, load_state_dict, SUPPORTED_FORMATS, DTYPE_MAP, \
-    try_then_default
+    try_then_default, search_key
 
 logger = logging.getLogger("ckpt-tool")
 
@@ -109,7 +110,7 @@ def prune(checkpoint: Path,
 @click.argument("output", type=click.Path(path_type=Path))
 @click.option("--overwrite",
               is_flag=True,
-              help="Whether to overwrite output")
+              help="Whether to overwrite output.")
 @click.option("--map-location",
               type=str,
               default="cpu",
@@ -118,12 +119,39 @@ def prune(checkpoint: Path,
               type=click.Choice(SUPPORTED_FORMATS),
               default=None,
               help='Save in which format. If not specified, infered from output path extension.')
+@click.option("--unscale",
+              is_flag=True,
+              help='Scale low rank tensors by rank / alpha.')
+@click.option("--dtype",
+              type=click.Choice(DTYPE_MAP.keys()),
+              default="fp16",
+              help='Save weights in this data type.')
 def extract_lora(checkpoint: Path,
                  output: Path,
                  overwrite: bool,
                  map_location: str,
-                 format: Optional[str]):
+                 format: Optional[str],
+                 unscale: bool,
+                 dtype: str):
+    """
+    Extract LoRA from a SCAL-SDT(!) checkpoint, then save to AddNet [1] compatible format.
+
+    [1] AddNet: https://github.com/kohya-ss/sd-webui-additional-networks
+    """
     check_overwrite(output, overwrite)
+
+    scale = None
+    run_config_path = checkpoint.parent / "config.yaml"
+
+    if unscale:
+        if not run_config_path.exists():
+            logger.warning("No corresponding config found for checkpoint, will not unscale")
+
+        optim_target = OmegaConf.load(run_config_path).optim_target
+        lora_config = next(search_key(optim_target, "lora"))
+        scale = lora_config.alpha / lora_config.rank
+
+    dtype = DTYPE_MAP[dtype]
 
     state_dict = load_state_dict(checkpoint, map_location)
 
@@ -135,14 +163,25 @@ def extract_lora(checkpoint: Path,
             .replace("_lora_A", ".lora_down.weight") \
             .replace("_lora_B", ".lora_up.weight")
 
+    def scale_lora(x: torch.Tensor):
+        if scale is not None:
+            x *= scale
+
+        x = x.to(dtype)  # TODO: underflow, and upstream AddNet problem
+        return x
+
     unet_state = {
-        "lora_unet_" + to_kohya_format(k): v
-        for k, v in unet_state.items() if "lora" in k
+        "lora_unet_" + to_kohya_format(k):
+            scale_lora(v)
+        for k, v in unet_state.items()
+        if "lora" in k
     }
 
     text_encoder_state = {
-        to_kohya_format(k).replace("cond_stage_model_transformer_text_model", "lora_te_text_model"): v
-        for k, v in state_dict.items() if "lora" in k and k.startswith("cond_stage_model")
+        to_kohya_format(k).replace("cond_stage_model_transformer_text_model", "lora_te_text_model"):
+            scale_lora(v)
+        for k, v in state_dict.items()
+        if "lora" in k and k.startswith("cond_stage_model")
     }
 
     state_dict = {**text_encoder_state, **unet_state}
@@ -259,7 +298,7 @@ def graft(base_model_path: Path,
 
     state = {**unet_state, **clip_state}
 
-    save_state_dict(state, output_path, format, overwrite)
+    save_state_dict(state, output_path, format)
 
 
 if __name__ == '__main__':

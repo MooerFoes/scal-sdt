@@ -6,6 +6,7 @@ from typing import Optional, Pattern, Callable, Any
 
 import PIL.Image as Image
 import torch
+from omegaconf import ListConfig, DictConfig
 
 STATE_DICT = dict[str, torch.Tensor]
 SUPPORTED_FORMATS = ["pt", "safetensors"]
@@ -54,9 +55,7 @@ def check_overwrite(path: Path, overwrite: bool):
         raise FileExistsError(f"{path} already exists")
 
 
-def save_state_dict(state: STATE_DICT, path: Path, format: Optional[str] = None, overwrite=False):
-    check_overwrite(path, overwrite)
-
+def save_state_dict(state: STATE_DICT, path: Path, format: Optional[str] = None):
     if format is None:
         format = infer_format_from_path(path)
 
@@ -135,3 +134,32 @@ def timeit(f: Callable[[], Any]):
     result = f()
     t = time.perf_counter() - start
     return result, t
+
+
+def enumerate_dict_config(conf: ListConfig, recurse=True):
+    for item in conf:
+        if isinstance(item, DictConfig):
+            yield item
+        elif recurse:
+            assert isinstance(conf, ListConfig)
+            yield from enumerate_dict_config(item)
+
+
+def search_key(conf: ListConfig | DictConfig, key: str, recurse=True):
+    if isinstance(conf, DictConfig):
+        value = conf.get(key)
+        if value is not None:
+            yield value
+
+        if not recurse:
+            return
+
+        for item in conf.values():
+            if not (isinstance(item, ListConfig) or isinstance(item, DictConfig)):
+                continue
+
+            yield from search_key(item, key, True)
+    elif recurse:
+        assert isinstance(conf, ListConfig)
+        for item in enumerate_dict_config(conf, False):
+            yield from search_key(item, key, True)
