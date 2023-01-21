@@ -60,6 +60,7 @@ def main():
 @click.option("--ema",
               is_flag=True,
               help="Use EMA weights.")
+@torch.no_grad()
 def prune(checkpoint: Path,
           output: Path,
           text_encoder: bool,
@@ -126,6 +127,7 @@ def prune(checkpoint: Path,
               type=click.Choice(DTYPE_MAP.keys()),
               default="fp16",
               help='Save weights in this data type.')
+@torch.no_grad()
 def extract_lora(checkpoint: Path,
                  output: Path,
                  overwrite: bool,
@@ -246,6 +248,7 @@ def load_as_diffusers_state(path: Path, device: str, ldm_config_path: Optional[s
               type=str,
               default=None,
               help="Link or path to the LDM config.")
+@torch.no_grad()
 def graft(base_model_path: Path,
           model_paths: list[Path],
           output_path: Path,

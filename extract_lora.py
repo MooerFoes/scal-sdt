@@ -18,7 +18,7 @@ logger = logging.getLogger("lora-approx")
 
 def lora_approx(delta_w: torch.Tensor, rank: int):
     """
-    Apply low-rank approximation to a dense layer weight difference using SVD,
+    Apply low-rank approximation to a weight difference using SVD,
     so for input x, x @ w + x @ v_t @ u is close to x @ w + x @ delta_w.
     (v_t, u) corresponds to (lora_down, lora_up).
     """
@@ -26,8 +26,11 @@ def lora_approx(delta_w: torch.Tensor, rank: int):
 
     u = u[:, :rank]
     s = s[:rank]
+
     u = u @ torch.diag(s)
     v_t = v_t[:rank, :]
+
+    # Error = (s.norm() - delta_w.norm()).abs()
 
     return v_t, u
 
@@ -71,7 +74,7 @@ def main(model: Path,
     """
     Extract difference between a full model and its base given a layer specification, then compute a low-rank approximation using SVD.
 
-    Sav format is AddNet [1] compatible.
+    Save format is AddNet [1] compatible.
 
     If using --device cuda, SVD solving will be ~15x faster than --device cpu depending on your actual specs.
 
