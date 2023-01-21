@@ -12,7 +12,7 @@ from modules.utils import DTYPE_MAP
 @click.command()
 @click.argument("checkpoint", type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.argument("output", type=click.Path(path_type=Path))
-@click.option("--config",
+@click.option("--config", "ldm_config_path",
               type=str,
               default=None,
               help="Link or path to the LDM config.")
@@ -22,6 +22,7 @@ from modules.utils import DTYPE_MAP
               help="Save unet weights in this data type.")
 @click.option("--vae",
               type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              required=True,
               help="Path to VAE ckpt.")
 # @click.option("--vae-dtype",
 #               type=DTYPE_CHOICES,
