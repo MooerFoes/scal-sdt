@@ -1,24 +1,23 @@
 import logging
-from argparse import Namespace
 from pathlib import Path
 from typing import Optional
 
+import click
 import pytorch_lightning as pl
 import torch
+from lightning_utilities.core.rank_zero import rank_zero_only, rank_zero_info, rank_zero_warn
 from omegaconf import OmegaConf, DictConfig
 from pytorch_lightning.callbacks import ModelCheckpoint
 
-from modules.args import parser
+from modules import configs
 from modules.model import StableDiffusionModel
 from modules.sample_callback import SampleCallback
 
-logger = logging.getLogger()
 
-
-def get_resuming_config(ckpt_path: Path) -> Optional[DictConfig]:
+def get_resuming_config(ckpt_path: Path) -> DictConfig:
     config_yaml = ckpt_path.parent / "config.yaml"
     if not config_yaml.is_file():
-        return None
+        raise FileNotFoundError("Config not found for the checkpoint specified")
 
     return OmegaConf.load(config_yaml)
 
@@ -28,46 +27,23 @@ def generate_run_id() -> str:
     return time.strftime("%y%m%d-%H%M%S")
 
 
-def get_params():
-    args = parser.parse_args()
-
-    config = OmegaConf.load('configs/__reserved_default__.yaml')
-
-    assert args.resume or args.config, "Either resume or config must be specified"
-
-    if args.resume:
-        logger.info("Trying to resume training, loading config from checkpoint")
-        resume_config = get_resuming_config(Path(args.resume))
-        if resume_config:
-            config = OmegaConf.merge(config, resume_config)
-        else:
-            logger.warning("Config not found for the checkpoint specified")
-
-    if args.config:
-        config = OmegaConf.merge(config, OmegaConf.load(args.config))
-
-    if args.run_id is None:
-        args.run_id = generate_run_id()
-
-    return args, config
-
-
+@rank_zero_only
 def verify_config(config: DictConfig):
     concepts = config.data.concepts
 
-    if any(concepts) and config.data.cache:
-        logger.warning("One or more concept is set, but won't be used as cache is specified")
-    elif not any(concepts):
+    have_concepts = any(concepts)
+
+    if have_concepts and config.data.cache is not None:
+        rank_zero_warn("One or more concept is set, but won't be used as cache is specified")
+    elif not have_concepts:
         raise Exception("No concept found and cache file is not specified")
 
     if not config.prior_preservation.enabled:
-        logger.info("Running: Standard Finetuning")
+        rank_zero_info("Running: Standard Finetuning")
         if any(concept for concept in concepts if concept.get("class_set") is not None):
-            logger.warning("Prior preservation loss is disabled, but there's concept with class set specified")
-    else:
-        logger.info("Running: DreamBooth")
-        assert all(concept.get("class_set") is not None for concept in concepts), \
-            "Prior preservation loss is enabled, but not all concepts have class set specified"
+            rank_zero_warn("Prior preservation loss is disabled, but there's concept with class set specified")
+    elif not all(concept.get("class_set") is not None for concept in concepts):
+        raise Exception("Prior preservation loss is enabled, but not all concepts have class set specified")
 
 
 def get_loggers(config: DictConfig):
@@ -99,45 +75,70 @@ def do_disable_amp_hack(model, config, trainer):
     trainer.strategy.precision_plugin = precision_plugin
 
 
-def main(args: Namespace, config: DictConfig):
-    verify_config(config)
-
-    ckpt_save_dir = Path(config.output_dir, config.project, args.run_id)
-    ckpt_save_dir.mkdir(parents=True, exist_ok=True)
-
-    if config.seed is not None:
-        pl.seed_everything(config.seed)
-
-    model = StableDiffusionModel.from_config(config)
+@click.command()
+@click.option("--config", "config_path",
+              type=click.Path(exists=True, dir_okay=False),
+              default=None,
+              help="Path to the training config file.")
+@click.option("--run-id",
+              type=str,
+              default=None,
+              help="Id of this run for saving checkpoint, defaults to current time formatted to yyddmm-HHMMSS.")
+@click.option("--resume", "resume_ckpt_path",
+              type=click.Path(exists=True, dir_okay=False),
+              default=None,
+              help="Resume from the specified checkpoint path. Corresponding config will be loaded if exists.")
+def main(config_path: Optional[Path],
+         run_id: Optional[str],
+         resume_ckpt_path: Optional[Path]):
+    if config_path is not None:
+        config = configs.load_with_defaults(config_path)
+    elif resume_ckpt_path is not None:
+        config = get_resuming_config(resume_ckpt_path)
+    else:
+        raise Exception("Either resume or config must be specified")
 
     loggers = get_loggers(config)
 
-    trainer: pl.Trainer = pl.Trainer.from_argparse_args(
-        args,
+    if run_id is None:
+        run_id = generate_run_id()
+
+    run_dir = Path(config.output_dir, config.project, run_id)
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    trainer = pl.Trainer(
         logger=loggers,
         callbacks=[
-            ModelCheckpoint(dirpath=ckpt_save_dir, **config.checkpoint),
-            SampleCallback(ckpt_save_dir / "samples")
+            ModelCheckpoint(dirpath=run_dir, **config.checkpoint),
+            SampleCallback(run_dir / "samples")
         ],
         benchmark=not config.aspect_ratio_bucket.enabled,
         replace_sampler_ddp=not config.aspect_ratio_bucket.enabled,
         **config.trainer
     )
 
+    verify_config(config)
+    rank_zero_info(f"Run ID: {run_id}")
+
+    if config.seed is not None:
+        pl.seed_everything(config.seed)
+
+    model = StableDiffusionModel.from_config(config)
+
     if config.force_disable_amp:
-        logger.info("Using direct cast, forcibly disabling AMP")
+        rank_zero_info("Using direct cast, forcibly disabling AMP")
         do_disable_amp_hack(model, config, trainer)
 
-    if args.resume is None:
+    if resume_ckpt_path is None:
         trainer.tune(model=model)
     else:
-        logger.info("Resuming, will not tune hyperparams")
+        rank_zero_info("Resuming, will not tune hyperparams")
 
-    OmegaConf.save(config, ckpt_save_dir / "config.yaml")
+    OmegaConf.save(config, run_dir / "config.yaml")
 
-    trainer.fit(model=model, ckpt_path=args.resume)
+    trainer.fit(model=model, ckpt_path=resume_ckpt_path)
 
 
 if __name__ == "__main__":
     logging.basicConfig(level="INFO")
-    main(*get_params())
+    main()

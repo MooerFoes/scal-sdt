@@ -1,10 +1,12 @@
 import itertools
+import logging
 import time
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Optional, Pattern, Callable, Any
 
 import PIL.Image as Image
+import lightning_utilities.core.rank_zero as rank_zero
 import torch
 from omegaconf import ListConfig, DictConfig
 
@@ -16,6 +18,14 @@ DTYPE_MAP = {
     "fp32": torch.float32,
     "bf16": torch.bfloat16
 }
+
+
+def rank_zero_info(message: str):
+    if getattr(rank_zero.rank_zero_only, "rank", None) is None:
+        logging.getLogger().info(message)
+        return
+
+    rank_zero.rank_zero_info(message)
 
 
 def get_string(link_or_path: str):

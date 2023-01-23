@@ -162,6 +162,7 @@ def config_module(config: DictConfig, module: nn.Module):
         module.requires_grad_(True)
         return list(module.parameters())
 
+    module.requires_grad_(False)
     params_to_optimize = list[nn.Parameter]()
 
     def apply_innermost(submodule: nn.Module, submodule_config: DictConfig, module_path: str):
@@ -206,10 +207,7 @@ class StableDiffusionModel(pl.LightningModule):
         vae.requires_grad_(False)
         vae.eval()
 
-        text_encoder.requires_grad_(False)
-        unet.requires_grad_(False)
-
-        self.params_to_optimize = self._config_net(config.optim_target, unet, text_encoder)
+        self._config_net(config.optim_target, unet, text_encoder)
 
         if config.gradient_checkpointing:
             unet.enable_gradient_checkpointing()
@@ -249,7 +247,7 @@ class StableDiffusionModel(pl.LightningModule):
         if isinstance(config.optim_target, str):
             config.optim_target = OmegaConf.load(OPTIM_TARGETS_DIR / (config.optim_target + ".yaml"))
         else:
-            assert isinstance(config.optim_target, dict)
+            assert isinstance(config.optim_target, DictConfig)
 
         return cls(config, unet, vae, text_encoder, tokenizer, noise_scheduler)
 
@@ -260,12 +258,18 @@ class StableDiffusionModel(pl.LightningModule):
         if (unet_config := config.get("unet")) is not None:
             params_to_optimize.extend(config_module(unet_config, unet))
         else:
+            unet.requires_grad_(False)
             unet.eval()
+            from types import MethodType
+            unet.train = MethodType(lambda self, mode: self, text_encoder)
 
         if (te_config := config.get("text_encoder")) is not None:
             params_to_optimize.extend(config_module(te_config, text_encoder))
         else:
+            text_encoder.requires_grad_(False)
             text_encoder.eval()
+            from types import MethodType
+            text_encoder.train = MethodType(lambda self, mode: self, text_encoder)
 
         return params_to_optimize
 
@@ -380,7 +384,8 @@ class StableDiffusionModel(pl.LightningModule):
         return train_dataloader
 
     def configure_optimizers(self):
-        optimizer = get_optimizer(self.params_to_optimize, self.config, self.trainer)
+        optimizer = get_optimizer(itertools.chain(self.unet.parameters(), self.text_encoder.parameters()), self.config,
+                                  self.trainer)
         lr_scheduler = get_lr_scheduler(self.config, optimizer)
         return {
             "optimizer": optimizer,
