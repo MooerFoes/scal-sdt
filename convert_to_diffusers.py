@@ -4,7 +4,7 @@ from typing import Optional
 import click
 from diffusers import StableDiffusionPipeline
 
-from modules.config import get_ldm_config
+from modules.configs import get_ldm_config
 from modules.model import load_ldm_checkpoint
 from modules.utils import DTYPE_MAP
 

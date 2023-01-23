@@ -10,7 +10,7 @@ from safetensors.torch import save_file
 from tqdm import trange
 from transformers import CLIPTextModel
 
-from modules.config import load_with_defaults
+from modules.configs import load_with_defaults
 from modules.model import StableDiffusionModel
 
 logger = logging.getLogger("cache")

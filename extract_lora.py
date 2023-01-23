@@ -1,4 +1,5 @@
 import logging
+from math import sqrt
 from pathlib import Path
 from typing import Optional
 
@@ -8,8 +9,8 @@ from omegaconf import OmegaConf
 from torch import nn
 from typing.io import IO
 
-from modules import config
-from modules.config import get_ldm_config
+from modules import configs
+from modules.configs import get_ldm_config
 from modules.model import load_ldm_checkpoint, load_df_pipeline, apply_module_config
 from modules.utils import check_overwrite, SUPPORTED_FORMATS, save_state_dict, DTYPE_MAP, try_then_default, timeit
 
@@ -41,7 +42,7 @@ def lora_approx(delta_w: torch.Tensor, rank: int):
 @click.argument("output", type=click.Path(path_type=Path))
 @click.option("--layer-spec",
               type=click.Path(path_type=Path),
-              default=config.OPTIM_TARGETS_DIR / "lora.yaml",
+              default=configs.OPTIM_TARGETS_DIR / "lora.yaml",
               help="The layer specification, examples given at config/optim_targets.")
 @click.option("--overwrite",
               is_flag=True,
@@ -58,9 +59,6 @@ def lora_approx(delta_w: torch.Tensor, rank: int):
               type=click.Choice(SUPPORTED_FORMATS),
               default=None,
               help='State dict saving format. If not specified, infered from output path extension.')
-@click.option("--scale",
-              is_flag=True,
-              help='Scale low rank tensor by alpha / rank if true.')
 @torch.no_grad()
 def main(model: Path,
          base_model: Path,
@@ -69,8 +67,7 @@ def main(model: Path,
          overwrite: bool,
          device: str,
          dtype: str,
-         format: Optional[str],
-         scale: bool):
+         format: Optional[str]):
     """
     Extract difference between a full model and its base given a layer specification, then compute a low-rank approximation using SVD.
 
@@ -90,7 +87,7 @@ def main(model: Path,
         if path.is_file():
             nonlocal ldm_config
             if ldm_config is None:
-                ldm_config = get_ldm_config(config.default().ldm_config)
+                ldm_config = get_ldm_config(configs.default().ldm_config)
 
             return load_ldm_checkpoint(path, ldm_config)
         else:
@@ -146,17 +143,14 @@ def main(model: Path,
 
         svd_total_time += t
 
-        if scale:
-            down *= lora_config.rank / lora_config.alpha
-            up *= lora_config.rank / lora_config.alpha
+        # X @ c Vt @ c U == c^2 X @ Vt @ U
+        scale = sqrt(lora_config.rank / lora_config.alpha)
 
-        state[f"{submodule_path}.lora_down.weight"] = down
-        state[f"{submodule_path}.lora_up.weight"] = up
+        state[f"{submodule_path}.lora_down.weight"] = (down * scale).to(DTYPE_MAP[dtype])
+        state[f"{submodule_path}.lora_up.weight"] = (up * scale).to(DTYPE_MAP[dtype])
+        state[f"{submodule_path}.alpha"] = torch.tensor(lora_config.alpha, dtype=torch.int32)
 
     logger.info(f"All SVD completed, total time {svd_total_time}s")
-
-    state = {k: v.to(DTYPE_MAP[dtype]) for k, v in state.items()}
-
     save_state_dict(state, output, format)
 
 

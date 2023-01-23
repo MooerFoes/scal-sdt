@@ -1,3 +1,4 @@
+import itertools
 import logging
 import math
 import warnings
@@ -16,7 +17,7 @@ from torch_ema import ExponentialMovingAverage
 from transformers import CLIPTokenizer, CLIPTextModel
 
 from modules.clip import hook_forward
-from modules.config import OPTIM_TARGETS_DIR, get_ldm_config
+from modules.configs import OPTIM_TARGETS_DIR, get_ldm_config
 from modules.custom_embeddings import CustomEmbeddingsHook
 from modules.dataset import get_dataset, get_sampler, collate_fn
 from modules.lora import get_lora

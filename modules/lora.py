@@ -1,4 +1,5 @@
 import loralib
+import torch
 from torch import nn
 
 
@@ -20,5 +21,7 @@ def get_lora(module: nn.Linear | nn.Conv2d, rank=4, alpha=1, dropout=0.):
     lora.bias = module.bias
     lora.lora_A.requires_grad = True
     lora.lora_B.requires_grad = True
+    delattr(lora, "lora_alpha")
+    lora.register_buffer("lora_alpha", torch.tensor(alpha, dtype=torch.int32))
 
     return lora.to(module.weight.device)

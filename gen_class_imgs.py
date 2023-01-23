@@ -9,7 +9,7 @@ from PIL import Image
 from diffusers.pipelines import StableDiffusionPipeline
 from tqdm import tqdm
 
-from modules.config import load_with_defaults
+from modules.configs import load_with_defaults
 from modules.dataset import Size
 from modules.dataset.bucket import BucketManager
 from modules.dataset.datasets import get_id_size_map
