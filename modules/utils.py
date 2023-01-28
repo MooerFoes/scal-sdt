@@ -103,12 +103,17 @@ def load_state_dict(path: Path, device="cpu", format: Optional[str] = None,
     return state
 
 
+# Hardcode an extension set, due to PIL.Image.registered_extensions() returns too many weird stuffs.
+SUPPORTED_EXTENSIONS = {'.jpe', '.jpg', '.jpeg', '.gif', '.apng', '.jfif', '.tif', '.tiff', '.bmp', '.png', '.webp'}
+
+
+def is_image_file(path: Path):
+    return path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS
+
+
 def list_images(*paths: Path) -> Iterable[Path]:
     return itertools.chain(*((
-        x for x in path.iterdir() if
-        x.is_file() and
-        x.suffix.lower() != ".txt" and
-        x.suffix.lower() in Image.registered_extensions().keys()
+        x for x in path.iterdir() if is_image_file(x)
     ) for path in paths))
 
 
