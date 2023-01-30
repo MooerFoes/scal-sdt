@@ -5,13 +5,16 @@ from typing import Optional
 import click
 import pytorch_lightning as pl
 import torch
-from lightning_utilities.core.rank_zero import rank_zero_only, rank_zero_info, rank_zero_warn
+from lightning_utilities.core.rank_zero import rank_zero_only
 from omegaconf import OmegaConf, DictConfig
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from modules import configs
 from modules.model import StableDiffusionModel
 from modules.sample_callback import SampleCallback
+from modules.utils import rank_zero_logger
+
+logger: logging.Logger
 
 
 def get_resuming_config(ckpt_path: Path) -> DictConfig:
@@ -34,14 +37,14 @@ def verify_config(config: DictConfig):
     have_concepts = any(concepts)
 
     if have_concepts and config.data.cache is not None:
-        rank_zero_warn("One or more concept is set, but won't be used as cache is specified")
+        logger.warning("One or more concept is set, but won't be used as cache is specified")
     elif not have_concepts:
         raise Exception("No concept found and cache file is not specified")
 
     if not config.prior_preservation.enabled:
-        rank_zero_info("Running: Standard Finetuning")
+        logger.warning("Running: Standard Finetuning")
         if any(concept for concept in concepts if concept.get("class_set") is not None):
-            rank_zero_warn("Prior preservation loss is disabled, but there's concept with class set specified")
+            logger.warning("Prior preservation loss is disabled, but there's concept with class set specified")
     elif not all(concept.get("class_set") is not None for concept in concepts):
         raise Exception("Prior preservation loss is enabled, but not all concepts have class set specified")
 
@@ -117,8 +120,12 @@ def main(config_path: Optional[Path],
         **config.trainer
     )
 
+    global logger
+    logger = rank_zero_logger()
+
     verify_config(config)
-    rank_zero_info(f"Run ID: {run_id}")
+
+    logger.info(f"Run ID: {run_id}")
 
     if config.seed is not None:
         pl.seed_everything(config.seed)
@@ -126,13 +133,13 @@ def main(config_path: Optional[Path],
     model = StableDiffusionModel.from_config(config)
 
     if config.force_disable_amp:
-        rank_zero_info("Using direct cast, forcibly disabling AMP")
+        logger.info("Using direct cast, forcibly disabling AMP")
         do_disable_amp_hack(model, config, trainer)
 
     if resume_ckpt_path is None:
         trainer.tune(model=model)
     else:
-        rank_zero_info("Resuming, will not tune hyperparams")
+        logger.info("Resuming, will not tune hyperparams")
 
     OmegaConf.save(config, run_dir / "config.yaml")
 

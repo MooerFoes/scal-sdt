@@ -3,6 +3,7 @@ import logging
 import time
 from collections.abc import Iterable
 from pathlib import Path
+from types import MethodType
 from typing import Optional, Pattern, Callable, Any
 
 import PIL.Image as Image
@@ -20,12 +21,15 @@ DTYPE_MAP = {
 }
 
 
-def rank_zero_info(message: str):
-    if getattr(rank_zero.rank_zero_only, "rank", None) is None:
-        logging.getLogger().info(message)
-        return
+def rank_zero_logger(name: Optional[str] = None):
+    logger = logging.getLogger(name)
 
-    rank_zero.rank_zero_info(message)
+    if getattr(rank_zero, "rank", None) is None:
+        return logger
+
+    log_rank_zero = rank_zero.rank_zero_only(logger._log)
+    logger._log = MethodType(log_rank_zero, logger)
+    return logger
 
 
 def get_string(link_or_path: str):

@@ -82,7 +82,7 @@ class AspectSampler(Sampler):
                  global_rank=0):
         super().__init__(data_source)
 
-        bucket_manager = BucketManager[int](batch_size, seed, world_size, global_rank, bucket_config.debug)
+        bucket_manager = BucketManager[int](batch_size, seed, world_size, global_rank)
 
         bucket_params = get_gen_bucket_params(base_size, bucket_config)
         bucket_manager.gen_buckets(**bucket_params)
@@ -98,7 +98,7 @@ class AspectSampler(Sampler):
             yield from (Index(index, size) for index in batch)
 
     def __len__(self):
-        if self.bucket_manager.epoch_empty:
+        if self.bucket_manager.epoch_null:
             self.bucket_manager.start_epoch()
 
         return self.bucket_manager.batch_total * self._batch_size
@@ -115,7 +115,7 @@ class AspectSamplerDB(Sampler):
                  world_size=1,
                  global_rank=0):
         super().__init__(data_source)
-        bucket_manager = BucketManager[int](batch_size, seed, world_size, global_rank, bucket_config.debug)
+        bucket_manager = BucketManager[int](batch_size, seed, world_size, global_rank)
 
         bucket_params = get_gen_bucket_params(base_size, bucket_config)
         bucket_manager.gen_buckets(**bucket_params)

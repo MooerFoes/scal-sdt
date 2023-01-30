@@ -51,7 +51,6 @@ prior_preservation:
 
 aspect_ratio_bucket:
   enabled: false
-  debug: false
   c_size: 1.5
   c_dim: 2
   c_div: 8

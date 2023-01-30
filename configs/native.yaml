@@ -58,7 +58,6 @@ prior_preservation:
 
 aspect_ratio_bucket:
   enabled: true
-  debug: false
 
 loggers:
   wandb:

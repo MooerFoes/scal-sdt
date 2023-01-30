@@ -4,7 +4,9 @@ from diffusers import (
 from diffusers.pipelines.latent_diffusion.pipeline_latent_diffusion import LDMBertConfig, LDMBertModel
 from transformers import CLIPTextModel
 
-from modules.utils import load_state_dict, rank_zero_info
+from modules.utils import load_state_dict, rank_zero_logger
+
+logger = rank_zero_logger("sd-to-diffusers")
 
 
 def shave_segments(path, n_shave_prefix_segments=1):
@@ -263,9 +265,9 @@ def convert_ldm_unet_checkpoint(checkpoint, config, extract_ema=False):
     unet_key = "model.diffusion_model."
     # at least a 100 parameters have to start with `model_ema` in order for the checkpoint to be EMA
     if sum(k.startswith("model_ema") for k in keys) > 100:
-        rank_zero_info(f"Checkpoint has both EMA and non-EMA weights.")
+        logger.info(f"Checkpoint has both EMA and non-EMA weights.")
         if extract_ema:
-            rank_zero_info(
+            logger.info(
                 "In this conversion only the EMA weights are extracted. If you want to instead extract the non-EMA"
                 " weights (useful to continue fine-tuning), please make sure to remove the `--extract_ema` flag.")
             for key in keys:
@@ -273,7 +275,7 @@ def convert_ldm_unet_checkpoint(checkpoint, config, extract_ema=False):
                     flat_ema_key = "model_ema." + "".join(key.split(".")[1:])
                     unet_state_dict[key.replace(unet_key, "")] = checkpoint.pop(flat_ema_key)
         else:
-            rank_zero_info(
+            logger.info(
                 "In this conversion only the non-EMA weights are extracted. If you want to instead extract the EMA"
                 " weights (usually better for inference), please make sure to add the `--extract_ema` flag.")
 
