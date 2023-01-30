@@ -101,13 +101,13 @@ def main(config_path: Optional[Path],
     else:
         raise Exception("Either resume or config must be specified")
 
-    loggers = get_loggers(config)
-
     if run_id is None:
         run_id = generate_run_id()
 
     run_dir = Path(config.output_dir, config.project, run_id)
     run_dir.mkdir(parents=True, exist_ok=True)
+
+    loggers = get_loggers(config)
 
     trainer = pl.Trainer(
         logger=loggers,
