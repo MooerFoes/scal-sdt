@@ -2,8 +2,6 @@
 
 Scalable Stable Diffusion Trainer
 
-[!] IN EARLY DEVELOPMENT, CONFIGS SUBJECT TO BREAKING CHANGES
-
 ## Features
 
 * Can run with <8GB VRAM
@@ -30,9 +28,9 @@ conda env create -f environment.yml
 conda activate ssdt
 ```
 
-#### Pip
+#### PyPI
 
-CUDA toolkit and torch should be installed manually.
+Python 3.10 is required. CUDA toolkit and torch should be installed manually.
 
 ```shell
 pip install -r requirements.txt
@@ -43,21 +41,18 @@ pip install -r requirements.txt
 **Documentation**: `configs/README.md`.
 ([Link](https://github.com/CCRcmcpe/scal-sdt/blob/main/configs/README.md))
 
-In `configs`, `native.yaml` (for so-called native training), `dreambooth.yaml`, `lora.yaml` provided as examples.
+In `configs` directory, `native.yaml` (for so-called native training), `dreambooth.yaml`, `lora.yaml` provided as examples.
 
 ### Run
 
-If you are running native training, proceed to the next step.  
-If you are running DreamBooth, run this to generate class (regularization) images:
+```shell
+python train.py --config configs/your_config.yaml
+```
+
+But if you are running DreamBooth, run this first to generate regularization images:
 
 ```shell
 python gen_class_imgs.py --config configs/your_config.yaml
-```
-
-Then run the training:
-
-```shell
-python train.py --config configs/your_config.yaml
 ```
 
 ### After Training
@@ -67,18 +62,17 @@ may not directly load the checkpoints due to the safe loading mechanism.
 To solve this issue and reduce checkpoint size:
 
 ```shell
-python ckpt_tool.py prune INPUT_CKPT OUTPUT_CKPT --unet-dtype fp16
+python ckpt_tool.py prune INPUT OUTPUT --unet-dtype fp16
 ```
 
-Results a ~1.6GB checkpoint which can be loaded by WebUI, containing fp16 UNet.
+`INPUT` is the path to the trained SCAL-SDT checkpoint.
 
-If you are not using WebUI and having issues, add `--text-encoder` and `--vae`
+If `OUTPUT` has suffix `.safetensors` then safetensors format will be used.
+
+A ~1.6GB file will be created, which can be loaded by WebUI, containing fp16 UNet states.
+
+If you are not using WebUI and having issues, specify both `--text-encoder` and `--vae`
 and remove `--unet-dtype fp16` to get a full checkpoint.
-
-### TPUs or other computing units?
-
-You may change `trainer.accelerator`.
-([Docs](https://pytorch-lightning.readthedocs.io/en/stable/common/trainer.html#pytorch_lightning.trainer.Trainer.params.accelerator))
 
 ### Advanced
 
