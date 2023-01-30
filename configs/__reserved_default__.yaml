@@ -40,8 +40,7 @@ checkpoint:
 
 trainer:
   accelerator: 'gpu'
-  devices: -1
-  auto_select_gpus: true
+  devices: [ 0 ]
   precision: 16
   move_metrics_to_cpu: true
   log_every_n_steps: 1
