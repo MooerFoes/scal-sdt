@@ -8,16 +8,16 @@ import torch
 from diffusers import AutoencoderKL
 from safetensors.torch import save_file
 from tqdm import trange
-from transformers import CLIPTextModel
 
 from modules.configs import load_with_defaults
-from modules.model import StableDiffusionModel
+from modules.model import LatentDiffusionModel
+from modules.text_encoders import CLIPTextEncoder
 
 logger = logging.getLogger("cache")
 
 
 class CacheBuilder(pl.LightningModule):
-    def __init__(self, vae: AutoencoderKL, text_encoder: Optional[CLIPTextModel]):
+    def __init__(self, vae: AutoencoderKL, text_encoder: Optional[CLIPTextEncoder]):
         super().__init__()
         self.vae = vae
         self.text_encoder = text_encoder
@@ -43,7 +43,7 @@ class CacheBuilder(pl.LightningModule):
         if self.text_encoder is None:
             return [{"id": id, "latent": latent} for id, latent in zip(ids, latents)]
 
-        conds = self.text_encoder.forward(batch["token_ids"]).last_hidden_state
+        conds = self.text_encoder(batch["prompts"])
         conds = self.batch_all_gather(conds)
         return [{"id": id, "latent": latent, "cond": cond} for id, latent, cond in zip(ids, latents, conds)]
 
@@ -91,8 +91,8 @@ def main(config_file: IO[str], no_conds: bool, aug_group_size: int, batch_size: 
         # As ARB batch entry order is random:
         raise Exception("Caching is not compatible with both Aspect Ratio Bucketing and augmentation enabled.")
 
-    model = StableDiffusionModel.from_config(config)
-    cache_builder = CacheBuilder(model.vae, model.text_encoder if not no_conds else None)
+    model = LatentDiffusionModel.from_config(config)
+    cache_builder = CacheBuilder(model.vae, model.condition_model if not no_conds else None)
 
     trainer = pl.Trainer(
         benchmark=not config.aspect_ratio_bucket.enabled,

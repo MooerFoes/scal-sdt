@@ -14,7 +14,7 @@ from modules.dataset import Size
 from modules.dataset.bucket import BucketManager
 from modules.dataset.datasets import get_id_size_map
 from modules.dataset.samplers import get_gen_bucket_params
-from modules.model import StableDiffusionModel
+from modules.model import LatentDiffusionModel
 from modules.utils import list_images
 
 logger = logging.getLogger("cls-gen")
@@ -86,7 +86,7 @@ def main(config_file: IO[str]):
         logger.warning("Prior preservation not enabled. Class image generation is not needed.")
         return
 
-    pipeline = StableDiffusionModel.from_config(config).pipeline
+    pipeline = LatentDiffusionModel.from_config(config).pipeline
     pipeline.unet.to(torch.float16)
     pipeline.to("cuda")
 

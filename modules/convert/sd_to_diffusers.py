@@ -2,7 +2,6 @@ from diffusers import (
     DDIMScheduler,
 )
 from diffusers.pipelines.latent_diffusion.pipeline_latent_diffusion import LDMBertConfig, LDMBertModel
-from transformers import CLIPTextModel
 
 from modules.utils import load_state_dict, rank_zero_logger
 
@@ -581,20 +580,6 @@ def convert_ldm_bert_checkpoint(checkpoint, config):
 
 
 def convert_ldm_clip_checkpoint(checkpoint):
-    # Silent the 'Some weights of the model checkpoint at openai/clip-vit-large-patch14 were not used' warning
-    from transformers import logging
-    logging.set_verbosity_error()
-
-    text_model = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14")
-
-    keys = list(checkpoint.keys())
-
-    text_model_dict = {}
-
-    for key in keys:
-        if key.startswith("cond_stage_model.transformer"):
-            text_model_dict[key[len("cond_stage_model.transformer."):]] = checkpoint[key]
-
-    text_model.load_state_dict(text_model_dict, strict=False)
-
-    return text_model
+    PREFIX = "cond_stage_model.transformer."
+    clip_state = {k.removeprefix(PREFIX): v for k, v in checkpoint.items() if k.startswith(PREFIX)}
+    return clip_state

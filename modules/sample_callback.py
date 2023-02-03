@@ -8,7 +8,7 @@ from PIL import Image
 from pytorch_lightning.utilities import rank_zero_only
 from tqdm import tqdm
 
-from .model import StableDiffusionModel
+from .model import LatentDiffusionModel
 
 
 class SampleCallback(pl.Callback):
@@ -17,7 +17,7 @@ class SampleCallback(pl.Callback):
 
     @torch.inference_mode()
     @rank_zero_only
-    def on_train_batch_end(self, trainer: pl.Trainer, model: StableDiffusionModel, outputs,
+    def on_train_batch_end(self, trainer: pl.Trainer, model: LatentDiffusionModel, outputs,
                            batch: Any, batch_idx: int) -> None:
         sampling_config = model.config.get("sampling")
         global_step = trainer.global_step
@@ -34,8 +34,8 @@ class SampleCallback(pl.Callback):
 
         samples = dict[str, list[Image.Image]]()
 
-        text_encoder_training = model.text_encoder.training
-        model.text_encoder.eval()
+        text_encoder_training = model.condition_model.training
+        model.condition_model.eval()
         model.unet.eval()
 
         for concept in tqdm(sampling_config.concepts, unit="concept"):
@@ -68,7 +68,7 @@ class SampleCallback(pl.Callback):
                     i -= actual_bsz
             samples[concept.prompt] = concept_samples
 
-        model.text_encoder.train(text_encoder_training)
+        model.condition_model.train(text_encoder_training)
         model.unet.train()
 
         if torch.cuda.is_available():
@@ -86,7 +86,7 @@ class SampleCallback(pl.Callback):
             import wandb
             log_samples = {
                 "samples": {
-                    prompt: [wandb.Image(x) for x in images] for prompt, images in samples.items()
+                    prompt[:230]: [wandb.Image(x) for x in images] for prompt, images in samples.items()
                 }
             }
             wandb.log(log_samples, global_step)

@@ -10,7 +10,7 @@ from omegaconf import OmegaConf, DictConfig
 from pytorch_lightning.callbacks import ModelCheckpoint
 
 from modules import configs
-from modules.model import StableDiffusionModel
+from modules.model import LatentDiffusionModel
 from modules.sample_callback import SampleCallback
 from modules.utils import rank_zero_logger
 
@@ -130,7 +130,7 @@ def main(config_path: Optional[Path],
     if config.seed is not None:
         pl.seed_everything(config.seed)
 
-    model = StableDiffusionModel.from_config(config)
+    model = LatentDiffusionModel.from_config(config)
 
     if config.force_disable_amp:
         logger.info("Using direct cast, forcibly disabling AMP")

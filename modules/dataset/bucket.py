@@ -30,18 +30,19 @@ T_id = TypeVar("T_id", bound=Hashable)
 
 
 class BucketManager(Generic[T_id]):
-    buckets: list[Bucket]
-    id_size_map: dict[T_id, Size] = {}
-    base_res: Size
-    epoch: Optional[dict[Bucket, list[T_id]]] = None
-    epoch_remainders: Optional[list[T_id]] = None
-    batch_total = 0
-    batch_delivered = 0
 
     def __init__(self, batch_size: int, seed: Optional[int] = None, world_size=1, global_rank=0):
         self.batch_size = batch_size
         self.world_size = world_size
         self.global_rank = global_rank
+
+        self.buckets: Optional[list[Bucket]] = None
+        self.id_size_map: dict[T_id, Size] = {}
+        self.base_res: Optional[Size] = None
+        self.epoch: Optional[dict[Bucket, list[T_id]]] = None
+        self.epoch_remainders: Optional[list[T_id]] = None
+        self.batch_total = 0
+        self.batch_delivered = 0
 
         self.bucket_prng = np.random.RandomState(seed)
         # separate prng for sharding use for increased thread resilience

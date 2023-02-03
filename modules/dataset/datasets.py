@@ -13,7 +13,6 @@ from safetensors import safe_open
 from torch.utils.data import Dataset
 from torchvision import transforms
 from tqdm import tqdm
-from transformers import CLIPTokenizer
 
 from . import Size
 from .augment import AugmentTransforms
@@ -29,7 +28,7 @@ class Concept:
 @dataclass
 class Item:
     id: int
-    token_ids: torch.Tensor
+    prompt: str
     image: torch.Tensor
 
 
@@ -50,28 +49,22 @@ class Index:
 
 
 class ImagePromptDataset(Dataset[ItemType]):
-    cache: Optional[safe_open] = None
-    _cache_metadata: Optional[dict[str, Any]] = None
-    _augment_transforms: Optional[AugmentTransforms] = None
-
     PLACEHOLDER_TXT_PROMPT = "{TXT_PROMPT}"
 
     def __init__(self,
                  concepts: Collection[Concept],
-                 tokenizer: CLIPTokenizer,
                  center_crop=False,
-                 pad_tokens=False,
                  augment_config: Optional[ListConfig] = None,
                  cache_file: Optional[str | PathLike] = None):
         self.dir_prompt_map = {Path(concept.path): concept.prompt for concept in concepts}
         self.image_paths = list(list_images(*self.dir_prompt_map.keys()))
-
         self.center_crop = center_crop
-        self.tokenizer = tokenizer
-        self.pad_tokens = pad_tokens
+
+        self.cache: Optional[safe_open] = None
+        self._cache_metadata: Optional[dict[str, Any]] = None
+        self._augment_transforms: Optional[AugmentTransforms] = None
 
         if augment_config is not None:
-            from .augment import AugmentTransforms
             self._augment_transforms = AugmentTransforms(augment_config)
 
         if cache_file is not None:
@@ -84,7 +77,7 @@ class ImagePromptDataset(Dataset[ItemType]):
             return Item(
                 id=index.value,
                 image=self._read_and_transform(path, index.size),
-                token_ids=self._tokenize(self._get_prompt(path))
+                prompt=self._get_prompt(path)
             )
         else:
             return CacheItem(
@@ -111,15 +104,6 @@ class ImagePromptDataset(Dataset[ItemType]):
         txt_prompt = txt_path.read_text()
         prompt = prompt.replace(self.PLACEHOLDER_TXT_PROMPT, txt_prompt)
         return prompt
-
-    def _tokenize(self, prompt: str) -> torch.Tensor:
-        return self.tokenizer(
-            prompt,
-            padding="max_length" if self.pad_tokens else "do_not_pad",
-            truncation=True,
-            max_length=self.tokenizer.model_max_length,
-            return_tensors="pt"
-        ).input_ids
 
     def _augment(self, image: torch.Tensor) -> torch.Tensor:
         w, h = image.shape[-1], image.shape[-2]
@@ -154,17 +138,16 @@ def get_id_size_map(image_paths: Iterable[Path]):
 
 
 class AspectDataset(ImagePromptDataset):
-    id_size_map: dict[int, Size] = {}
-
     def __init__(self, *args, debug=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.debug = debug
+
+        self.id_size_map: dict[int, Size]()
 
         if self.cache is None:
             self.id_size_map = get_id_size_map(self.image_paths)
         else:
             sizes_info = self._cache_metadata["sizes"]
-            self.id_size_map = {}
             for k in self._cache_metadata["entries"]:
                 self.id_size_map[k] = Size(sizes_info[f"{k}.latent.0"])
 

@@ -13,9 +13,9 @@ from modules import configs
 from modules.configs import get_ldm_config
 from modules.convert.diffusers_to_sd import convert_unet_state_dict
 from modules.convert.sd_to_diffusers import convert_ldm_unet_checkpoint, create_unet_diffusers_config
-from modules.model import load_components, apply_module_config
+from modules.model import load_components
 from modules.utils import check_overwrite, save_state_dict, load_state_dict, SUPPORTED_FORMATS, DTYPE_MAP, \
-    try_then_default, search_key, STATE_DICT
+    try_then_default, search_key, STATE_DICT, apply_module_config
 
 logger = logging.getLogger("ckpt-tool")
 

@@ -10,6 +10,7 @@ import PIL.Image as Image
 import lightning_utilities.core.rank_zero as rank_zero
 import torch
 from omegaconf import ListConfig, DictConfig
+from torch import nn
 
 STATE_DICT = dict[str, torch.Tensor]
 SUPPORTED_FORMATS = ["pt", "safetensors"]
@@ -182,3 +183,53 @@ def search_key(conf: ListConfig | DictConfig, key: str, recurse=True):
         assert isinstance(conf, ListConfig)
         for item in enumerate_dict_config(conf, False):
             yield from search_key(item, key, True)
+
+
+class TransformersNoStupidWarnings:
+    """Silent warnings like "Some weights of the model checkpoint at openai/clip-vit-large-patch14 were not used"."""
+    from transformers import logging
+    def __enter__(self):
+        self._prev_verbosity = self.logging.get_verbosity()
+        self.logging.set_verbosity_error()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.logging.set_verbosity(self._prev_verbosity)
+
+
+def set_submodule(module: nn.Module, name: str, sub: nn.Module):
+    segments = name.split(".")
+    module = module.get_submodule(".".join(segments[:-1]))
+    module.__setattr__(segments[-1], sub)
+
+
+def apply_module_config(module: nn.Module, module_configs: ListConfig,
+                        fn: Callable[[nn.Module, DictConfig, str], None], recursive=True, path=""):
+    for module_config in module_configs:
+        index = module_config.get("index")
+        targets = module_config.get("targets")
+
+        def invoke_on_submodule(_submodule: nn.Module, _module_path: str):
+            _path = _module_path if path == "" else f"{path}.{_module_path}"
+            if recursive and targets is not None:
+                apply_module_config(_submodule, module_config.targets, fn,
+                                    path=_path)
+            else:
+                fn(_submodule, module_config, _path)
+
+        if index is None:
+            for name, submodule in module.named_children():
+                if submodule == module:
+                    continue
+
+                invoke_on_submodule(submodule, name)
+        else:
+            for module_path in index:
+                submodule = module.get_submodule(module_path)
+                invoke_on_submodule(submodule, module_path)
+
+
+def raise_if_nan(x: torch.Tensor, name: str):
+    if not torch.any(torch.isnan(x)):
+        return
+
+    raise Exception(f"NaN element discovered in {name}")

@@ -3,7 +3,7 @@ import logging
 import math
 import warnings
 from pathlib import Path
-from typing import Any, Optional, Callable
+from typing import Any, Optional, Sequence
 
 import pytorch_lightning as pl
 import torch
@@ -11,17 +11,19 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 import torch.utils.data
 from diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel, StableDiffusionPipeline
-from omegaconf import DictConfig, OmegaConf, ListConfig
+from omegaconf import DictConfig, OmegaConf
 from torch import nn
 from torch_ema import ExponentialMovingAverage
-from transformers import CLIPTokenizer, CLIPTextModel
+from tqdm import tqdm
+from transformers import CLIPTextModel
 
-from modules.clip import hook_forward
+from modules import text_encoders
 from modules.configs import OPTIM_TARGETS_DIR, get_ldm_config
-from modules.custom_embeddings import CustomEmbeddingsHook
 from modules.dataset import get_dataset, get_sampler, collate_fn
 from modules.lora import get_lora
-from modules.utils import get_class, physical_core_count, load_state_dict
+from modules.text_encoders import CLIPTextEncoder, CustomEmbedding
+from modules.utils import get_class, physical_core_count, load_state_dict, infer_format_from_path, set_submodule, \
+    apply_module_config, raise_if_nan
 
 logger = logging.getLogger()
 
@@ -65,7 +67,7 @@ def get_lr_scheduler(config, optimizer) -> Any:
     return scheduler
 
 
-def load_df_pipeline(path: str, vae: Optional[str] = None, tokenizer: Optional[str] = None):
+def load_df_pipeline(path: str, vae: Optional[str] = None, clip_stop_at_layer=1):
     unet = UNet2DConditionModel.from_pretrained(path, subfolder="unet")
 
     if vae is None:
@@ -73,20 +75,14 @@ def load_df_pipeline(path: str, vae: Optional[str] = None, tokenizer: Optional[s
     else:
         vae = AutoencoderKL.from_pretrained(vae)
 
-    text_encoder = CLIPTextModel.from_pretrained(path, subfolder="text_encoder")
+    text_encoder = CLIPTextEncoder(path, clip_stop_at_layer)
 
-    if tokenizer is None:
-        tokenizer = CLIPTokenizer.from_pretrained(path, subfolder="tokenizer")
-    else:
-        tokenizer = CLIPTokenizer.from_pretrained(tokenizer)
+    scheduler = DDIMScheduler.from_pretrained(path, subfolder="scheduler")
 
-    noise_scheduler = DDIMScheduler.from_pretrained(path, subfolder="scheduler")
-
-    return unet, vae, text_encoder, tokenizer, noise_scheduler
+    return unet, vae, text_encoder, scheduler
 
 
-def load_ldm_checkpoint(path: Path, config: DictConfig, vae_path: Optional[Path] = None,
-                        tokenizer: Optional[str] = None):
+def load_ldm_checkpoint(path: Path, config: DictConfig, vae_path: Optional[Path] = None, clip_stop_at_layer=1):
     state_dict = load_state_dict(path)
 
     from modules.convert.sd_to_diffusers import (
@@ -103,58 +99,24 @@ def load_ldm_checkpoint(path: Path, config: DictConfig, vae_path: Optional[Path]
     unet.load_state_dict(unet_state_dict)
 
     vae_config = create_vae_diffusers_config(config)
-    converted_vae_checkpoint = convert_ldm_vae_checkpoint(state_dict, vae_config, vae_path)
+    vae_state_dict = convert_ldm_vae_checkpoint(state_dict, vae_config, vae_path)
     vae = AutoencoderKL(**vae_config)
-    vae.load_state_dict(converted_vae_checkpoint)
+    vae.load_state_dict(vae_state_dict)
 
-    text_encoder = convert_ldm_clip_checkpoint(state_dict)
+    clip_state_dict = convert_ldm_clip_checkpoint(state_dict)
+    text_encoder = CLIPTextEncoder(text_encoders.CLIP_L, clip_stop_at_layer)
+    text_encoder.encoder.load_state_dict(clip_state_dict, strict=False)
 
-    tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14" if tokenizer is None else tokenizer)
+    scheduler = DDIMScheduler.from_pretrained("CompVis/stable-diffusion-v1-4", subfolder="scheduler")
 
-    noise_scheduler = DDIMScheduler.from_pretrained("CompVis/stable-diffusion-v1-4", subfolder="scheduler")
-
-    return unet, vae, text_encoder, tokenizer, noise_scheduler
+    return unet, vae, text_encoder, scheduler
 
 
-def load_components(name: str, vae: Optional[str] = None, tokenizer: Optional[str] = None,
-                    ldm_config_path: Optional[str] = None):
+def load_components(name: str, vae: Optional[str] = None, ldm_config_path: Optional[str] = None):
     if (path := Path(name)).is_file():
-        return load_ldm_checkpoint(path, get_ldm_config(ldm_config_path), Path(vae) if vae is not None else None,
-                                   tokenizer)
+        return load_ldm_checkpoint(path, get_ldm_config(ldm_config_path), Path(vae) if vae is not None else None)
     else:
-        return load_df_pipeline(name, vae, tokenizer)
-
-
-def set_submodule(module: nn.Module, name: str, sub: nn.Module):
-    segments = name.split(".")
-    module = module.get_submodule(".".join(segments[:-1]))
-    module.__setattr__(segments[-1], sub)
-
-
-def apply_module_config(module: nn.Module, module_configs: ListConfig,
-                        fn: Callable[[nn.Module, DictConfig, str], None], recursive=True, path=""):
-    for module_config in module_configs:
-        index = module_config.get("index")
-        targets = module_config.get("targets")
-
-        def invoke_on_submodule(_submodule: nn.Module, _module_path: str):
-            _path = _module_path if path == "" else f"{path}.{_module_path}"
-            if recursive and targets is not None:
-                apply_module_config(_submodule, module_config.targets, fn,
-                                    path=_path)
-            else:
-                fn(_submodule, module_config, _path)
-
-        if index is None:
-            for name, submodule in module.named_children():
-                if submodule == module:
-                    continue
-
-                invoke_on_submodule(submodule, name)
-        else:
-            for module_path in index:
-                submodule = module.get_submodule(module_path)
-                invoke_on_submodule(submodule, module_path)
+        return load_df_pipeline(name, vae)
 
 
 def config_module(config: DictConfig, module: nn.Module):
@@ -185,71 +147,61 @@ def config_module(config: DictConfig, module: nn.Module):
     return params_to_optimize
 
 
-def raise_if_nan(x: torch.Tensor, name: str):
-    if not torch.any(torch.isnan(x)):
-        return
-
-    raise Exception(f"NaN element discovered in {name}")
-
-
-class StableDiffusionModel(pl.LightningModule):
+class LatentDiffusionModel(pl.LightningModule):
     unet_ema: Optional[ExponentialMovingAverage] = None
 
     def __init__(self,
                  config: DictConfig,
                  unet: UNet2DConditionModel,
+                 scheduler,
                  vae: AutoencoderKL,
-                 text_encoder: CLIPTextModel,
-                 tokenizer: CLIPTokenizer,
-                 noise_scheduler: DDIMScheduler):
+                 condition_model: CLIPTextEncoder):
         super().__init__()
 
         vae.requires_grad_(False)
         vae.eval()
 
-        self._config_net(config.optim_target, unet, text_encoder)
+        self._config_net(config.optim_target, unet, condition_model.encoder)
 
         if config.gradient_checkpointing:
             unet.enable_gradient_checkpointing()
-            text_encoder.gradient_checkpointing_enable()
+            condition_model.encoder.gradient_checkpointing_enable()
 
         if config.xformers:
             unet.set_use_memory_efficient_attention_xformers(True)
 
-        self.pipeline = StableDiffusionPipeline(vae, text_encoder, tokenizer, unet, noise_scheduler, None, None, False)
+        self.pipeline = StableDiffusionPipeline(vae, condition_model.encoder, condition_model.tokenizer, unet,
+                                                scheduler, None, None, False)
         self.pipeline.set_progress_bar_config(disable=True)
 
         self.config = config
         self.unet = unet
+        self.scheduler = scheduler
         self.vae = vae
-        self.text_encoder = text_encoder
-        self.tokenizer = tokenizer
-        self.noise_scheduler = noise_scheduler
+        self.condition_model = condition_model
 
         self.save_hyperparameters(config)
 
     @classmethod
     def from_config(cls, config: DictConfig):
-        unet, vae, text_encoder, tokenizer, noise_scheduler = \
-            load_components(config.model, config.vae, config.tokenizer, config.ldm_config)
+        unet, vae, text_encoder, scheduler = \
+            load_components(config.model, config.vae, config.ldm_config)
 
         logger.info("Weights loaded")
 
-        hook_forward(text_encoder, -config.clip_stop_at_layer)
-
         if config.custom_embeddings.enabled:
-            custom_embeddings_hooker = CustomEmbeddingsHook(config.custom_embeddings.path)
-            custom_embeddings_hooker.hook_clip(text_encoder, tokenizer)
-            embs = custom_embeddings_hooker.embs
-            info = [f"{k}: {v.shape[0]}" for k, v in embs.items()]
-            logger.info(f"Loaded {len(embs)} custom embeddings: {info}")
+            embed_paths = [path for path in Path(config.custom_embeddings.path).iterdir()
+                           if infer_format_from_path(path) is not None]
+            embs = [CustomEmbedding.load(embed_path) for embed_path in tqdm(embed_paths)]
+            logger.info(f"Loaded total of {len(embs)} custom embeddings")
+            text_encoder.init_custom_embeddings(embs)
 
         if isinstance(config.optim_target, str):
             config.optim_target = OmegaConf.load(OPTIM_TARGETS_DIR / (config.optim_target + ".yaml"))
         else:
             assert isinstance(config.optim_target, DictConfig)
 
-        return cls(config, unet, vae, text_encoder, tokenizer, noise_scheduler)
+        return cls(config, unet, scheduler, vae, text_encoder)
 
     @staticmethod
     def _config_net(config: DictConfig, unet: UNet2DConditionModel, text_encoder: CLIPTextModel):
@@ -287,79 +239,80 @@ class StableDiffusionModel(pl.LightningModule):
 
         return latents
 
-    def _encode_token_ids(self, token_ids: torch.Tensor):
-        return self.text_encoder.forward(token_ids).last_hidden_state
-
-    def _get_embedding(self, token_ids: torch.Tensor):
+    @torch.no_grad()
+    def _get_condition(self, prompts: Sequence[str]):
         uc_conf = self.config.uncond
 
         if not (uc_conf.enabled and torch.rand(1) < uc_conf.p):
-            return self._encode_token_ids(token_ids)
+            return self.condition_model(prompts)
 
-        bsz, length = token_ids.shape
-        encoder_config = self.text_encoder.config
+        bsz = len(prompts)
+        length = self.condition_model.tokenizer.model_max_length
+
+        encoder_config = self.condition_model.config
 
         match uc_conf.cond:
             case "zeros":
                 return torch.zeros(bsz, length, encoder_config.hidden_size, device=self.unet.device)
-            case "bos":
-                fill_token_id = encoder_config.bos_token_id
             case "eos":
-                fill_token_id = encoder_config.eos_token_id
+                return self.condition_model(bsz * [""])
             case _:
                 raise Exception("Invalid uncond.cond")
 
-        token_ids = torch.full((bsz, length), fill_token_id, device=self.unet.device)
-
-        return self.text_encoder.forward(token_ids).last_hidden_state
-
-    def training_step(self, batch, batch_idx):
-        if "latents" in batch:
-            latents = batch["latents"].to(self.unet.dtype)
-        else:
-            latents = self._vae_encode(batch["images"]).to(self.unet.dtype)
-
-        raise_if_nan(latents, "VAE output")
+    def _denoise_loss(self, latents, conds):
+        latents.to(self.unet.dtype)
+        conds.to(self.unet.dtype)
 
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents)
         bsz = latents.shape[0]
         # Sample a random timestep for each image
-        timesteps = torch.randint(0, self.noise_scheduler.config.num_train_timesteps, (bsz,),
-                                  dtype=torch.int64, device=latents.device)
+        timesteps = torch.randint(0, self.scheduler.config.num_train_timesteps, (bsz,),
+                                  dtype=torch.int64, device=self.unet.device)
 
         # Add noise to the latents according to the noise magnitude at each timestep
         # (this is the forward diffusion process)
-        noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
+        noisy_latents = self.scheduler.add_noise(latents, noise, timesteps)
+
+        pred = self.unet(noisy_latents, timesteps, conds).sample
+
+        match self.scheduler.config.prediction_type:
+            case "epsilon":
+                target = noise
+            case "sample":
+                target = latents
+            case "v":
+                target = self.scheduler.get_velocity(latents, noise, timesteps)
+            case _:
+                raise Exception("Unknown prediction type")
+
+        return F.mse_loss(pred, target, reduction="none")
+
+    def training_step(self, batch, batch_idx):
+        if "latents" in batch:
+            latents = batch["latents"]
+        else:
+            latents = self._vae_encode(batch["images"])
+
+        raise_if_nan(latents, "VAE output")
 
         # Get the text embedding for conditioning
         if "conds" in batch:
-            conds = batch["conds"].to(self.unet.dtype)
+            conds = batch["conds"]
         else:
-            conds = self._get_embedding(batch["token_ids"]).to(self.unet.dtype)
+            conds = self._get_condition(batch["prompts"])
 
         raise_if_nan(conds, "text encoder output")
 
-        # Predict the noise residual
-        noise_pred = self.unet(noisy_latents, timesteps, conds).sample
+        loss = self._denoise_loss(latents, conds)
 
-        raise_if_nan(noise_pred, "UNet output")
+        raise_if_nan(loss, "loss")
 
         if self.config.prior_preservation.enabled:
-            # Chunk the noise and noise_pred into two parts and compute the loss on each part separately.
-            noise_pred, noise_pred_prior = torch.chunk(noise_pred, 2, dim=0)
-            noise, noise_prior = torch.chunk(noise, 2, dim=0)
-
-            # Compute instance loss
-            loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="none").mean([1, 2, 3]).mean()
-
-            # Compute prior loss
-            prior_loss = F.mse_loss(noise_pred_prior.float(), noise_prior.float(), reduction="mean")
-
-            # Add the prior loss to the instance loss.
-            loss = loss + self.config.prior_preservation.prior_loss_weight * prior_loss
+            loss, prior_loss = torch.chunk(loss, 2, dim=0)
+            loss = loss.mean() + self.config.prior_preservation.prior_loss_weight * prior_loss.mean()
         else:
-            loss = F.mse_loss(noise_pred.float(), noise.float(), reduction="mean")
+            loss = loss.mean()
 
         self.log_dict({
             "train_loss": loss.item(),
@@ -369,7 +322,7 @@ class StableDiffusionModel(pl.LightningModule):
 
     def train_dataloader(self, use_cache=True):
         use_cache = self.config.data.cache is not None and use_cache
-        train_dataset = get_dataset(self.config, self.tokenizer, use_cache)
+        train_dataset = get_dataset(self.config, use_cache)
 
         sampler = get_sampler(train_dataset, self.config, self.trainer.world_size, self.trainer.global_rank)
 
@@ -384,7 +337,8 @@ class StableDiffusionModel(pl.LightningModule):
         return train_dataloader
 
     def configure_optimizers(self):
-        optimizer = get_optimizer(itertools.chain(self.unet.parameters(), self.text_encoder.parameters()), self.config,
+        optimizer = get_optimizer(itertools.chain(self.unet.parameters(), self.condition_model.parameters()),
+                                  self.config,
                                   self.trainer)
         lr_scheduler = get_lr_scheduler(self.config, optimizer)
         return {
@@ -461,7 +415,7 @@ class StableDiffusionModel(pl.LightningModule):
         self.unet.load_state_dict(state_dict["unet"])
 
         if hasattr(self.config.optim_target, "text_encoder") is not None:
-            self.text_encoder.load_state_dict(state_dict["text_encoder"])
+            self.condition_model.encoder.load_state_dict(state_dict["text_encoder"])
 
     @property
     def should_update_ema(self):

@@ -2,7 +2,6 @@ from collections.abc import Iterable
 
 import torch
 from omegaconf import DictConfig
-from transformers import CLIPTokenizer
 
 Size = tuple[int, int]
 
@@ -12,12 +11,10 @@ from .datasets import Item, Concept, ImagePromptDataset, DBDataset, AspectDatase
 SSDT_Dataset = ImagePromptDataset | AspectDataset | DBDataset
 
 
-def get_dataset(config: DictConfig, tokenizer: CLIPTokenizer, use_cache=True):
+def get_dataset(config: DictConfig, use_cache=True):
     dataset_type = ImagePromptDataset if not config.aspect_ratio_bucket.enabled else AspectDataset
     dataset_params = {
-        "tokenizer": tokenizer,
         "center_crop": config.data.center_crop,
-        "pad_tokens": config.pad_tokens,
         "augment_config": config.get("augment"),
         "cache_file": config.data.cache if use_cache else None
     }
@@ -55,8 +52,8 @@ def get_sampler(dataset: SSDT_Dataset, config: DictConfig, world_size: int, glob
 
 
 def collate_fn(batch: Iterable[ItemType | tuple[ItemType, ItemType]]):
-    token_ids_array = list[torch.Tensor]()
-    images_array = list[torch.Tensor]()
+    prompt_array = list[str]()
+    image_array = list[torch.Tensor]()
 
     # Cache
     conditions_array = list[torch.Tensor]()
@@ -69,8 +66,8 @@ def collate_fn(batch: Iterable[ItemType | tuple[ItemType, ItemType]]):
     def append(item: ItemType):
         ids.append(item.id)
         if isinstance(item, Item):
-            token_ids_array.append(item.token_ids)
-            images_array.append(item.image)
+            prompt_array.append(item.prompt)
+            image_array.append(item.image)
         elif isinstance(item, CacheItem):
             conditions_array.append(item.condition)
             latents_array.append(item.latent)
@@ -95,7 +92,7 @@ def collate_fn(batch: Iterable[ItemType | tuple[ItemType, ItemType]]):
         if any(conditions_array):
             result["conds"] = torch.stack(conditions_array)
     else:
-        result["token_ids"] = torch.cat(token_ids_array)
-        result["images"] = torch.stack(images_array)
+        result["prompts"] = prompt_array
+        result["images"] = torch.stack(image_array)
 
     return result
