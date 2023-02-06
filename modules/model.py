@@ -1,4 +1,4 @@
-import itertools
+import logging
 import logging
 import math
 import warnings
@@ -28,27 +28,36 @@ from modules.utils import get_class, physical_core_count, load_state_dict, infer
 logger = logging.getLogger()
 
 
-def get_optimizer(paramters_to_optimize, config, trainer: pl.Trainer):
-    params = dict(config.optimizer.params)
+def get_optimizer(params, config, trainer: pl.Trainer):
+    optimizer_params = dict(config.optimizer.params)
+
+    if "beta1" in optimizer_params and "beta2" in optimizer_params:
+        optimizer_params["betas"] = (optimizer_params["beta1"], optimizer_params["beta2"])
+        del optimizer_params["beta1"]
+        del optimizer_params["beta2"]
+
+    optimizer_class = get_class(config.optimizer.name)
+    optimizer = optimizer_class(params, **optimizer_params)
 
     lr_scale_config = config.optimizer.lr_scale
     if lr_scale_config.enabled:
         coeff = trainer.accumulate_grad_batches * config.batch_size * trainer.num_nodes * trainer.num_devices
-        if lr_scale_config.method == "linear":
-            params["lr"] *= coeff
-        elif lr_scale_config.method == "sqrt":
-            params["lr"] *= math.sqrt(coeff)
-        else:
-            raise ValueError(lr_scale_config.method)
+        match lr_scale_config.method:
+            case "linear":
+                pass
+            case "sqrt":
+                coeff = math.sqrt(coeff)
+            case _:
+                raise ValueError(lr_scale_config.method)
 
-    optimizer_class = get_class(config.optimizer.name)
+        # optimizer.defaults["lr"] *= coeff
 
-    if "beta1" in params and "beta2" in params:
-        params["betas"] = (params["beta1"], params["beta2"])
-        del params["beta1"]
-        del params["beta2"]
+        for param_group in optimizer.param_groups:
+            if "lr" in param_group:
+                param_group["lr"] *= coeff
 
-    optimizer = optimizer_class(paramters_to_optimize, **params)
+            if "weight_decay" in param_group:
+                param_group["weight_decay"] /= coeff
 
     return optimizer
 
@@ -120,31 +129,34 @@ def load_components(name: str, vae: Optional[str] = None, ldm_config_path: Optio
 
 
 def config_module(config: DictConfig, module: nn.Module):
-    if config.get("all", False):
-        module.requires_grad_(True)
-        return list(module.parameters())
-
     module.requires_grad_(False)
-    params_to_optimize = list[nn.Parameter]()
+    param_groups = list[dict[str, Any]]()
 
     def apply_innermost(submodule: nn.Module, submodule_config: DictConfig, module_path: str):
         if (lora_config := submodule_config.get("lora")) is not None:
             assert isinstance(submodule, nn.Linear) or isinstance(submodule, nn.Conv2d)
             submodule = get_lora(submodule, **lora_config)
             set_submodule(module, module_path, submodule)
-            params_to_optimize.extend([submodule.lora_A, submodule.lora_B])
+            params = [submodule.lora_A, submodule.lora_B]
         else:
-            params_to_optimize.extend(submodule.parameters())
+            params = submodule.parameters()
+
+        for param in params:
+            param.requires_grad = True
+
+        param_groups.append({
+            "params": params,
+            **submodule_config.get("optimizer", {})
+        })
 
     apply_module_config(module, config.targets, apply_innermost)
 
-    for param in params_to_optimize:
-        param.requires_grad = True
-
-    if len(list(module.parameters())) != len(params_to_optimize):
+    if len(list(module.parameters())) != len([param
+                                              for group in param_groups
+                                              for param in group["params"]]):
         warnings.filterwarnings("ignore", message="None of the inputs have requires_grad=True. Gradients will be None")
 
-    return params_to_optimize
+    return param_groups
 
 
 class LatentDiffusionModel(pl.LightningModule):
@@ -161,7 +173,7 @@ class LatentDiffusionModel(pl.LightningModule):
         vae.requires_grad_(False)
         vae.eval()
 
-        self._config_net(config.optim_target, unet, condition_model.encoder)
+        self.param_groups = self._config_net(config.optim_target, unet, condition_model.encoder)
 
         if config.gradient_checkpointing:
             unet.enable_gradient_checkpointing()
@@ -205,25 +217,25 @@ class LatentDiffusionModel(pl.LightningModule):
 
     @staticmethod
     def _config_net(config: DictConfig, unet: UNet2DConditionModel, text_encoder: CLIPTextModel):
-        params_to_optimize = list[nn.Parameter]()
+        param_groups = list[dict[str, Any]]()
 
-        if (unet_config := config.get("unet")) is not None:
-            params_to_optimize.extend(config_module(unet_config, unet))
-        else:
-            unet.requires_grad_(False)
-            unet.eval()
-            from types import MethodType
-            unet.train = MethodType(lambda self, mode: self, text_encoder)
+        def _add_component(component_config: Optional[DictConfig], component: nn.Module):
+            if component_config is None:
+                return
 
-        if (te_config := config.get("text_encoder")) is not None:
-            params_to_optimize.extend(config_module(te_config, text_encoder))
-        else:
-            text_encoder.requires_grad_(False)
-            text_encoder.eval()
-            from types import MethodType
-            text_encoder.train = MethodType(lambda self, mode: self, text_encoder)
+            params = config_module(component_config, component)
+            if not any(params):
+                from types import MethodType
+                component.requires_grad_(False)
+                component.eval()
+                component.train = MethodType(lambda self, mode: self, text_encoder)
 
-        return params_to_optimize
+            param_groups.extend(params)
+
+        _add_component(config.get("unet"), unet)
+        _add_component(config.get("text_encoder"), text_encoder)
+
+        return param_groups
 
     @torch.no_grad()
     def _vae_encode(self, image):
@@ -337,9 +349,7 @@ class LatentDiffusionModel(pl.LightningModule):
         return train_dataloader
 
     def configure_optimizers(self):
-        optimizer = get_optimizer(itertools.chain(self.unet.parameters(), self.condition_model.parameters()),
-                                  self.config,
-                                  self.trainer)
+        optimizer = get_optimizer(self.param_groups, self.config, self.trainer)
         lr_scheduler = get_lr_scheduler(self.config, optimizer)
         return {
             "optimizer": optimizer,

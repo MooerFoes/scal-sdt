@@ -9,6 +9,11 @@ unet:
   parameterization: 'eps'
   targets:
     - index: [ 'down_blocks.0', 'down_blocks.1', 'down_blocks.2', 'mid_block', 'up_blocks.1', 'up_blocks.2', 'up_blocks.3' ]
+      recurse_conf:
+        lora: *lora
+        optimizer:
+          lr: 5e-4
+          weight_decay: 2e-2
       targets:
         - index: [ 'attentions' ]
           targets:
@@ -19,22 +24,22 @@ unet:
                         - index: [ 'attn1', 'attn2' ]
                           targets:
                             - index: [ 'to_q', 'to_k', 'to_v', 'to_out.0' ]
-                              lora: *lora
                         - index: [ 'ff.net.0.proj', 'ff.net.2' ]
-                          lora: *lora
                 - index: [ 'proj_in', 'proj_out' ]
-                  lora: *lora
 
 text_encoder:
   targets:
     - index: [ 'text_model.encoder.layers' ]
+      recurse_conf:
+        lora: *lora
+        optimizer:
+          lr: 5e-3
+          weight_decay: 2e-3
       targets:
         - targets:
             - index: [ 'self_attn' ]
               targets:
                 - index: [ 'k_proj', 'v_proj', 'q_proj', 'out_proj' ]
-                  lora: *lora
             - index: [ 'mlp' ]
               targets:
                 - index: [ 'fc1', 'fc2' ]
-                  lora: *lora
