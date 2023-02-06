@@ -1,5 +1,4 @@
 import logging
-import logging
 import math
 import warnings
 from pathlib import Path
@@ -139,7 +138,7 @@ def config_module(config: DictConfig, module: nn.Module):
             set_submodule(module, module_path, submodule)
             params = [submodule.lora_A, submodule.lora_B]
         else:
-            params = submodule.parameters()
+            params = list(submodule.parameters())
 
         for param in params:
             param.requires_grad = True
@@ -220,15 +219,17 @@ class LatentDiffusionModel(pl.LightningModule):
         param_groups = list[dict[str, Any]]()
 
         def _add_component(component_config: Optional[DictConfig], component: nn.Module):
-            if component_config is None:
-                return
+            params = []
 
-            params = config_module(component_config, component)
+            if component_config is not None:
+                params = config_module(component_config, component)
+
             if not any(params):
                 from types import MethodType
                 component.requires_grad_(False)
                 component.eval()
                 component.train = MethodType(lambda self, mode: self, text_encoder)
+                return
 
             param_groups.extend(params)
 
