@@ -1,8 +1,13 @@
-# Custom Diffusion (network part), reference: https://github.com/adobe-research/custom-diffusion
+lora: &lora
+  rank: 16
+  alpha: 1
+  dropout: 0.
 
 unet:
   targets:
     - index: [ 'down_blocks.0', 'down_blocks.1', 'down_blocks.2', 'mid_block', 'up_blocks.1', 'up_blocks.2', 'up_blocks.3' ]
+      recurse_conf:
+        lora: *lora
       targets:
         - index: [ 'attentions' ]
           targets:
