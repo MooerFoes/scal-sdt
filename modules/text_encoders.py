@@ -9,7 +9,8 @@ from einops import rearrange
 from torch import nn
 from transformers import PreTrainedTokenizerBase
 
-from modules.utils import TransformersNoStupidWarnings, rank_zero_logger
+from .utils import TransformersNoStupidWarnings
+from .utils.logging import rank_zero_logger
 
 CLIP_L = "openai/clip-vit-large-patch14"
 CLIP_H = "laion/CLIP-ViT-H-14-laion2B-s32B-b79K"

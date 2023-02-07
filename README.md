@@ -41,7 +41,8 @@ pip install -r requirements.txt
 **Documentation**: `configs/README.md`.
 ([Link](https://github.com/CCRcmcpe/scal-sdt/blob/main/configs/README.md))
 
-In `configs` directory, `native.yaml` (for so-called native training), `dreambooth.yaml`, `lora.yaml` provided as examples.
+In `configs` directory, `native.yaml` (for so-called native training), `dreambooth.yaml`, `lora.yaml` provided as
+examples.
 
 ### Run
 

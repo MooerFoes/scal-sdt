@@ -6,7 +6,7 @@ import torchvision.transforms.functional as T_f
 from omegaconf import ListConfig
 from torchvision.transforms import InterpolationMode
 
-from ..utils import get_class
+from ..utils.activator import get_class
 
 
 # From https://stackoverflow.com/a/16778797/10444046

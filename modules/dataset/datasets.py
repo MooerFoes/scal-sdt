@@ -16,7 +16,7 @@ from tqdm import tqdm
 
 from . import Size
 from .augment import AugmentTransforms
-from ..utils import read_image, list_images
+from ..utils.io.image import read_image, list_images
 
 
 @dataclass

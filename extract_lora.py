@@ -12,8 +12,10 @@ from typing.io import IO
 from modules import configs
 from modules.configs import get_ldm_config
 from modules.model import load_ldm_checkpoint, load_df_pipeline
-from modules.utils import check_overwrite, SUPPORTED_FORMATS, save_state_dict, DTYPE_MAP, try_then_default, timeit, \
-    apply_module_config
+from modules.utils.hof import try_then_default, timeit
+from modules.utils.io import check_overwrite
+from modules.utils.state import save_state_dict, SUPPORTED_FORMATS, DTYPE_MAP
+from modules.utils.torch.module import apply_module_config
 
 logger = logging.getLogger("lora-approx")
 

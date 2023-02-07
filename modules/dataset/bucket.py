@@ -5,7 +5,7 @@ from typing import Optional, Generic, TypeVar
 import numpy as np
 
 from . import Size
-from ..utils import rank_zero_logger
+from ..utils.logging import rank_zero_logger
 
 logger = rank_zero_logger("arb")
 

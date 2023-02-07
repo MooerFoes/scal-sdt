@@ -15,7 +15,7 @@ from modules.dataset.bucket import BucketManager
 from modules.dataset.datasets import get_id_size_map
 from modules.dataset.samplers import get_gen_bucket_params
 from modules.model import LatentDiffusionModel
-from modules.utils import list_images
+from modules.utils.io.image import list_images
 
 logger = logging.getLogger("cls-gen")
 

@@ -14,8 +14,11 @@ from modules.configs import get_ldm_config
 from modules.convert.diffusers_to_sd import convert_unet_state_dict
 from modules.convert.sd_to_diffusers import convert_ldm_unet_checkpoint, create_unet_diffusers_config
 from modules.model import load_components
-from modules.utils import check_overwrite, save_state_dict, load_state_dict, SUPPORTED_FORMATS, DTYPE_MAP, \
-    try_then_default, search_key, STATE_DICT, apply_module_config
+from modules.utils.config import search_key
+from modules.utils.hof import try_then_default
+from modules.utils.io import check_overwrite
+from modules.utils.state import save_state_dict, load_state_dict, STATE, SUPPORTED_FORMATS, DTYPE_MAP
+from modules.utils.torch.module import apply_module_config
 
 logger = logging.getLogger("ckpt-tool")
 
@@ -154,7 +157,7 @@ def extract_lora(checkpoint: Path,
 
     state_dict = load_state_dict(checkpoint, map_location)
 
-    def to_kohya_format(state: STATE_DICT, prefix: str):
+    def to_kohya_format(state: STATE, prefix: str):
         lora_modules = set()
         result = {}
 

@@ -4,7 +4,6 @@ from typing import Optional
 
 import click
 import pytorch_lightning as pl
-import torch
 from lightning_utilities.core.rank_zero import rank_zero_only
 from omegaconf import OmegaConf, DictConfig
 from pytorch_lightning.callbacks import ModelCheckpoint
@@ -12,7 +11,8 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from modules import configs
 from modules.model import LatentDiffusionModel
 from modules.sample_callback import SampleCallback
-from modules.utils import rank_zero_logger
+from modules.utils.fix_ddp import DDPStaticGraphStrategy
+from modules.utils.logging import rank_zero_logger
 
 logger: logging.Logger
 
@@ -62,20 +62,6 @@ def get_loggers(config: DictConfig):
         train_loggers.append(WandbLogger(project=config.project, save_dir=str(project_dir)))
 
     return train_loggers
-
-
-def do_disable_amp_hack(model, config, trainer):
-    match config.trainer.precision:
-        case 16:
-            model.unet = model.unet.to(torch.float16)
-        case "bf16":
-            model.unet = model.unet.to(torch.bfloat16)
-
-    # Dirty hack to silent "Attempting to unscale FP16 gradients"
-    from pytorch_lightning.plugins import PrecisionPlugin
-    precision_plugin = PrecisionPlugin()
-    precision_plugin.precision = config.trainer.precision
-    trainer.strategy.precision_plugin = precision_plugin
 
 
 @click.command()
@@ -134,7 +120,7 @@ def main(config_path: Optional[Path],
 
     if config.force_disable_amp:
         logger.info("Using direct cast, forcibly disabling AMP")
-        do_disable_amp_hack(model, config, trainer)
+        model.disable_amp_hack(model, config, trainer)
 
     if resume_ckpt_path is None:
         trainer.tune(model=model)

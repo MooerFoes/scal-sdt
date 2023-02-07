@@ -71,9 +71,6 @@ class SampleCallback(pl.Callback):
         model.condition_model.train(text_encoder_training)
         model.unet.train()
 
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-
         for i, (_, images) in enumerate(samples.items()):
             for j, image in enumerate(images):
                 image.save(save_dir / f"{i}-{j}.png")

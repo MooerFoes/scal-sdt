@@ -6,7 +6,7 @@ from diffusers import StableDiffusionPipeline
 
 from modules.configs import get_ldm_config
 from modules.model import load_ldm_checkpoint
-from modules.utils import DTYPE_MAP
+from modules.utils.state import DTYPE_MAP
 
 
 @click.command()

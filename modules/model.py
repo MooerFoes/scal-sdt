@@ -10,19 +10,22 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 import torch.utils.data
 from diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel, StableDiffusionPipeline
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig, OmegaConf, ListConfig
 from torch import nn
 from torch_ema import ExponentialMovingAverage
 from tqdm import tqdm
 from transformers import CLIPTextModel
 
-from modules import text_encoders
-from modules.configs import OPTIM_TARGETS_DIR, get_ldm_config
-from modules.dataset import get_dataset, get_sampler, collate_fn
-from modules.lora import get_lora
-from modules.text_encoders import CLIPTextEncoder, CustomEmbedding
-from modules.utils import get_class, physical_core_count, load_state_dict, infer_format_from_path, set_submodule, \
-    apply_module_config, raise_if_nan
+from . import text_encoders
+from .configs import OPTIM_TARGETS_DIR, get_ldm_config
+from .dataset import get_dataset, get_sampler, collate_fn
+from .lora import get_lora
+from .text_encoders import CLIPTextEncoder, CustomEmbedding
+from .utils.activator import get_class
+from .utils.state import infer_format, load_state_dict
+from .utils.sysinfo import physical_core_count
+from .utils.torch import raise_if_nan
+from .utils.torch.module import set_submodule, apply_module_config, freeze_permanently
 
 logger = logging.getLogger()
 
@@ -127,7 +130,7 @@ def load_components(name: str, vae: Optional[str] = None, ldm_config_path: Optio
         return load_df_pipeline(name, vae)
 
 
-def config_module(config: DictConfig, module: nn.Module):
+def config_module(module: nn.Module, module_configs: ListConfig):
     module.requires_grad_(False)
     param_groups = list[dict[str, Any]]()
 
@@ -148,7 +151,7 @@ def config_module(config: DictConfig, module: nn.Module):
             **submodule_config.get("optimizer", {})
         })
 
-    apply_module_config(module, config.targets, apply_innermost)
+    apply_module_config(module, module_configs, apply_innermost)
 
     if len(list(module.parameters())) != len([param
                                               for group in param_groups
@@ -202,7 +205,7 @@ class LatentDiffusionModel(pl.LightningModule):
 
         if config.custom_embeddings.enabled:
             embed_paths = [path for path in Path(config.custom_embeddings.path).iterdir()
-                           if infer_format_from_path(path) is not None]
+                           if infer_format(path) is not None]
             embs = [CustomEmbedding.load(embed_path) for embed_path in tqdm(embed_paths)]
             logger.info(f"Loaded total of {len(embs)} custom embeddings")
             text_encoder.init_custom_embeddings(embs)
@@ -222,13 +225,10 @@ class LatentDiffusionModel(pl.LightningModule):
             params = []
 
             if component_config is not None:
-                params = config_module(component_config, component)
+                params = config_module(component, component_config.targets)
 
             if not any(params):
-                from types import MethodType
-                component.requires_grad_(False)
-                component.eval()
-                component.train = MethodType(lambda self, mode: self, text_encoder)
+                freeze_permanently(component)
                 return
 
             param_groups.extend(params)
@@ -238,7 +238,19 @@ class LatentDiffusionModel(pl.LightningModule):
 
         return param_groups
 
-    @torch.no_grad()
+    def disable_amp(self):
+        match self.config.trainer.precision:
+            case 16:
+                self.unet = self.unet.to(torch.float16)
+            case "bf16":
+                self.unet = self.unet.to(torch.bfloat16)
+
+        # Dirty hack to silent "Attempting to unscale FP16 gradients"
+        from pytorch_lightning.plugins import PrecisionPlugin
+        precision_plugin = PrecisionPlugin()
+        precision_plugin.precision = self.config.trainer.precision
+        self.trainer.strategy.precision_plugin = precision_plugin
+
     def _vae_encode(self, image):
         device = self.unet.device
 
@@ -252,7 +264,6 @@ class LatentDiffusionModel(pl.LightningModule):
 
         return latents
 
-    @torch.no_grad()
     def _get_condition(self, prompts: Sequence[str]):
         uc_conf = self.config.uncond
 

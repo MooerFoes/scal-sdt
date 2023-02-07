@@ -5,7 +5,7 @@ from typing import IO, Optional
 
 from omegaconf import OmegaConf, DictConfig
 
-from modules.utils import get_string
+from .utils.io.net import get_string
 
 CONFIGS_DIR = Path(__file__).parent.parent / "configs"
 OPTIM_TARGETS_DIR = CONFIGS_DIR / "optim_targets"

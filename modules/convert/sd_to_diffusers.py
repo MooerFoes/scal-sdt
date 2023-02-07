@@ -3,7 +3,8 @@ from diffusers import (
 )
 from diffusers.pipelines.latent_diffusion.pipeline_latent_diffusion import LDMBertConfig, LDMBertModel
 
-from modules.utils import load_state_dict, rank_zero_logger
+from modules.utils.logging import rank_zero_logger
+from modules.utils.state import load_state_dict
 
 logger = rank_zero_logger("sd-to-diffusers")
 
