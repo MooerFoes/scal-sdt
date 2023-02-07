@@ -6,7 +6,6 @@ lora: &lora
   dropout: 0.
 
 unet:
-  parameterization: 'eps'
   targets:
     - index: [ 'down_blocks.0', 'down_blocks.1', 'down_blocks.2', 'mid_block', 'up_blocks.1', 'up_blocks.2', 'up_blocks.3' ]
       recurse_conf:

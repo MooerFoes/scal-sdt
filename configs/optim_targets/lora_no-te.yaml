@@ -1,0 +1,22 @@
+lora: &lora
+  rank: 16
+  alpha: 1
+  dropout: 0.
+
+unet:
+  targets:
+    - index: [ 'down_blocks.0', 'down_blocks.1', 'down_blocks.2', 'mid_block', 'up_blocks.1', 'up_blocks.2', 'up_blocks.3' ]
+      recurse_conf:
+        lora: *lora
+      targets:
+        - index: [ 'attentions' ]
+          targets:
+            - targets:
+                - index: [ 'transformer_blocks' ]
+                  targets:
+                    - targets:
+                        - index: [ 'attn1', 'attn2' ]
+                          targets:
+                            - index: [ 'to_q', 'to_k', 'to_v', 'to_out.0' ]
+                        - index: [ 'ff.net.0.proj', 'ff.net.2' ]
+                - index: [ 'proj_in', 'proj_out' ]
