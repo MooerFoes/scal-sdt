@@ -45,7 +45,7 @@ checkpoint:
 
 trainer:
   accelerator: 'gpu'
-  # strategy: 'ddp_find_unused_parameters_false'
+  # strategy: 'ddp_static_graph'
   # num_nodes: 1
   # devices: -1
   devices: [ 0 ]
