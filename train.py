@@ -7,6 +7,7 @@ import pytorch_lightning as pl
 from lightning_utilities.core.rank_zero import rank_zero_only
 from omegaconf import OmegaConf, DictConfig
 from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.strategies import StrategyRegistry
 
 from modules import configs
 from modules.model import LatentDiffusionModel
@@ -94,6 +95,8 @@ def main(config_path: Optional[Path],
     run_dir.mkdir(parents=True, exist_ok=True)
 
     loggers = get_loggers(config)
+
+    StrategyRegistry.register("ddp_static_graph", DDPStaticGraphStrategy, find_unused_parameters=False)
 
     trainer = pl.Trainer(
         logger=loggers,
