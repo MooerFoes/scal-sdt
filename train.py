@@ -43,7 +43,6 @@ def verify_config(config: DictConfig):
         raise Exception("No concept found and cache file is not specified")
 
     if not config.prior_preservation.enabled:
-        logger.warning("Running: Standard Finetuning")
         if any(concept for concept in concepts if concept.get("class_set") is not None):
             logger.warning("Prior preservation loss is disabled, but there's concept with class set specified")
     elif not all(concept.get("class_set") is not None for concept in concepts):
