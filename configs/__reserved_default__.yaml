@@ -1,4 +1,4 @@
-model: ???
+model: null
 ldm_config: 'https://github.com/CompVis/stable-diffusion/raw/main/configs/stable-diffusion/v1-inference.yaml'
 vae: null
 tokenizer: null
@@ -69,8 +69,8 @@ ema:
 loggers: { }
 
 optimizer:
-  name: bitsandbytes.optim.AdamW8bit
-  params: ???
+  name: torch.optim.AdamW
+  params: { }
   lr_scale:
     enabled: true
     method: 'sqrt'
