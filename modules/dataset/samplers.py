@@ -128,7 +128,7 @@ class AspectSamplerDB(Sampler):
         self._world_size = world_size
         self._batch_size = batch_size
 
-        class_bucket_manager = BucketManager[int](1, seed, world_size, global_rank, False)
+        class_bucket_manager = BucketManager[int](1, seed, world_size, global_rank)
         class_bucket_manager.buckets = instance_buckets
         class_bucket_manager.base_res = bucket_manager.base_res
 
@@ -154,7 +154,7 @@ class AspectSamplerDB(Sampler):
                 yield Index(instance_id, instance_size), Index(class_id, instance_size)
 
     def __len__(self):
-        if self.bucket_manager.epoch_empty:
+        if self.bucket_manager.epoch_null:
             self.bucket_manager.start_epoch()
 
         return self.bucket_manager.batch_total * self._batch_size
