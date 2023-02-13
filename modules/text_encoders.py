@@ -63,7 +63,7 @@ class CustomEmbedding:
         assert len(embs) == 1, f'Embedding "{keyword}": Expected one embedding per file, got {len(embs)}.'
 
         vectors = embs[0]
-        cls.logger.info("Keyword: {}, num vectors: {}", keyword, len(vectors))
+        cls.logger.info(f"Keyword: {keyword}, num vectors: {len(vectors)}")
 
         return cls(keyword, vectors)
 
@@ -106,10 +106,9 @@ class CLIPTextEncoder(TextEncoder):
 
         custom_vectors = torch.cat([emb.vectors for emb in custom_embeddings], dim=0)
 
-        emb_layer = self.encoder.get_input_embeddings()
+        emb_layer: nn.Embedding = self.encoder.get_input_embeddings()
         vectors = torch.cat([emb_layer.weight, custom_vectors], dim=0)
         emb_layer.weight = torch.nn.Parameter(vectors, requires_grad=False)
-        self.encoder.set_input_embeddings(emb_layer)
 
         original_prepare_for_tokenization = self.tokenizer.prepare_for_tokenization
 

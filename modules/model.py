@@ -123,11 +123,14 @@ def load_ldm_checkpoint(path: Path, config: DictConfig, vae_path: Optional[Path]
     return unet, vae, text_encoder, scheduler
 
 
-def load_components(name: str, vae: Optional[str] = None, ldm_config_path: Optional[str] = None):
+def load_components(name: str, vae: Optional[str] = None, ldm_config: Optional[str] = None,
+                    clip_stop_at_layer: Optional[int] = 1):
     if (path := Path(name)).is_file():
-        return load_ldm_checkpoint(path, get_ldm_config(ldm_config_path), Path(vae) if vae is not None else None)
+        ldm_config = get_ldm_config(ldm_config)
+        vae_path = Path(vae) if vae is not None else None
+        return load_ldm_checkpoint(path, ldm_config, vae_path, clip_stop_at_layer)
     else:
-        return load_df_pipeline(name, vae)
+        return load_df_pipeline(name, vae, clip_stop_at_layer)
 
 
 def config_module(module: nn.Module, module_configs: ListConfig):
@@ -199,7 +202,7 @@ class LatentDiffusionModel(pl.LightningModule):
     @classmethod
     def from_config(cls, config: DictConfig):
         unet, vae, text_encoder, scheduler = \
-            load_components(config.model, config.vae, config.ldm_config)
+            load_components(config.model, config.vae, config.ldm_config, config.clip_stop_at_layer)
 
         logger.info("Weights loaded")
 

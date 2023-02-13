@@ -281,7 +281,7 @@ def graft(base_model_path: Path,
 
     layer_config = OmegaConf.load(layer_spec)
 
-    components = load_components(str(base_model_path), ldm_config_path=ldm_config)
+    components = load_components(str(base_model_path), ldm_config=ldm_config)
     base_unet, base_clip = components[0], components[2]
     del components
 
