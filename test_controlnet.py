@@ -1,15 +1,15 @@
 import inspect
 from pathlib import Path
-from types import MethodType
 
 import gradio as gr
 import numpy as np
 import torch
 from PIL import Image
-from diffusers import UNet2DConditionModel, StableDiffusionPipeline, DPMSolverMultistepScheduler
+from diffusers import UNet2DConditionModel, DPMSolverMultistepScheduler
 from torchvision.transforms import functional as F_t
 
-from modules.controlnet import ControlNet, ControlledUNet
+from modules.controlnet import ControlNet
+from modules.controlnet.control_diffusion import ControlDiffusionPipeline
 from modules.model import load_components
 from modules.utils.state import load_state_dict
 
@@ -39,6 +39,7 @@ controlnet.enable_xformers_memory_efficient_attention()
 unet, vae, encoder, _ = load_components(
     MODEL,
     vae=VAE,
+    ldm_config="v1-inference.yaml",
     # clip_stop_at_layer=2
 )
 
@@ -50,35 +51,16 @@ defaults = {
 }
 scheduler = DPMSolverMultistepScheduler(**defaults)
 
-vae.cuda()
-
-image_cond_tensor = None
-
-
-def hook_forward(*args, **kwargs):
-    control_kwargs = kwargs.copy()
-    control_kwargs["image_condition"] = image_cond_tensor
-    control = controlnet(*args[1:], **control_kwargs)
-
-    kwargs["down_connect_hidden_states"] = control.down_connect_hidden_states
-    kwargs["mid_connect_hidden_state"] = control.mid_connect_hidden_state
-
-    return ControlledUNet.forward(*args, **kwargs)
-
-
-unet.forward = MethodType(hook_forward, unet)
-
-pipeline = StableDiffusionPipeline(vae, encoder.encoder, encoder.tokenizer, unet, scheduler, None, None, False)
+pipeline = ControlDiffusionPipeline(vae, encoder.encoder, encoder.tokenizer, unet, scheduler, None, None,
+                                    requires_safety_checker=False, controlnets=[controlnet])
 
 pipeline.to("cuda")
 pipeline.set_use_memory_efficient_attention_xformers(True)
 
 
-def process(input_image, prompt, n_prompt, scale, seed):
-    global image_cond_tensor
+def process(image_cond_tensor, prompt, n_prompt, scale, seed):
     generator = torch.Generator(device="cuda")
     generator.manual_seed(seed)
-    image_cond_tensor = F_t.to_tensor(input_image["mask"][:, :, :-1]).cuda()
     final: Image.Image = pipeline(
         prompt=prompt,
         negative_prompt=n_prompt,
@@ -87,9 +69,18 @@ def process(input_image, prompt, n_prompt, scale, seed):
         num_images_per_prompt=1,
         width=512,
         height=512,
-        generator=generator
+        generator=generator,
+        image_conditions=image_cond_tensor,
+        image_condition_cfg=False,
+        # image_conditions=[image_cond_tensor],
+        # image_cfg_scales=[4],
+        # image_condition_cfg=True
     ).images[0]
     return [final]
+
+
+def gradio_process(input_image, *args):
+    return process(F_t.to_tensor(input_image["mask"][:, :, :-1]).cuda(), *args)
 
 
 def create_canvas():
@@ -120,7 +111,7 @@ def main():
                 result_gallery = gr.Gallery(label='Output', show_label=False, elem_id="gallery").style(grid=2,
                                                                                                        height='auto')
         ips = [input_image, prompt, n_prompt, scale, seed]
-        run_button.click(fn=process, inputs=ips, outputs=[result_gallery])
+        run_button.click(fn=gradio_process, inputs=ips, outputs=[result_gallery])
 
     block.launch(server_name='127.0.0.1', server_port=1919)
 
