@@ -2,7 +2,7 @@ import logging
 import math
 import warnings
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any, Optional, Sequence, Mapping
 
 import pytorch_lightning as pl
 import torch
@@ -12,13 +12,13 @@ import torch.utils.data
 from diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel, StableDiffusionPipeline
 from omegaconf import DictConfig, OmegaConf, ListConfig
 from torch import nn
-from torch_ema import ExponentialMovingAverage
 from tqdm import tqdm
 from transformers import CLIPTextModel
 
 from . import text_encoders
 from .configs import OPTIM_TARGETS_DIR, get_ldm_config
 from .dataset import get_dataset, get_sampler, collate_fn
+from .ema import ExponentialMovingAverage
 from .lora import get_lora
 from .text_encoders import CLIPTextEncoder, CustomEmbedding
 from .utils.activator import get_class
@@ -376,71 +376,25 @@ class LatentDiffusionModel(pl.LightningModule):
         }
 
     def on_save_checkpoint(self, checkpoint: dict[str, Any]):
-        """Diffusers -> SSDT LDM"""
-        state_dict = checkpoint["state_dict"]
+        state_dict = {}
 
-        # EMA (Cannot be directly loaded by LDM)
-        ema_dict = {}
+        params_requires_grad = {
+            name: param
+            for name, param in self.named_parameters()
+            if param.requires_grad
+        }
+        state_dict.update(params_requires_grad)
+
         if self.unet_ema is not None:
-            with self.unet_ema.average_parameters(), torch.no_grad():
-                ema_dict = {
-                    "unet_ema": {
-                        "decay": self.unet_ema.decay,
-                        "num_updates": self.unet_ema.num_updates,
-                        "state_dict": self.unet.state_dict()
-                    }
-                }
-            self.unet_ema.collected_params = None
+            state_dict.update({"unet_ema": self.unet_ema.state_dict()})
 
-        from modules.convert.diffusers_to_sd import convert_unet_state_dict
+        checkpoint["state_dict"] = state_dict
 
-        unet_dict = {k.removeprefix("unet."): v for k, v in state_dict.items() if k.startswith("unet.")}
-        unet_dict = convert_unet_state_dict(unet_dict)
-        unet_dict = {"model.diffusion_model." + k: v for k, v in unet_dict.items()}
+    def load_state_dict(self, state_dict: Mapping[str, Any], strict: bool = False):
+        if self.unet_ema is not None:
+            self.unet_ema.load_state_dict(state_dict["unet_ema"])
 
-        text_encoder_dict = {}
-        # Save text encoder state only if it was unfreezed
-        if hasattr(self.config.optim_target, "text_encoder"):
-            text_encoder_dict = {"cond_stage_model.transformer." + k.removeprefix("text_encoder."): v
-                                 for k, v in state_dict.items() if k.startswith("text_encoder.")}
-
-        checkpoint["state_dict"] = {
-            **unet_dict,
-            **ema_dict,
-            **text_encoder_dict
-        }
-
-    def on_load_checkpoint(self, checkpoint: dict[str, Any]):
-        """SSDT LDM -> Diffusers"""
-        state_dict = checkpoint["state_dict"]
-
-        ema_dict = state_dict["unet_ema"]
-
-        from modules.convert.sd_to_diffusers import convert_ldm_unet_checkpoint
-
-        unet_dict = convert_ldm_unet_checkpoint(state_dict, self.unet.config, extract_ema=False)
-
-        text_encoder_dict = {k.removeprefix("cond_stage_model.transformer."): v
-                             for k, v in state_dict.items() if k.startswith("cond_stage_model.transformer.")}
-
-        checkpoint["state_dict"] = {
-            "unet": unet_dict,
-            "unet_ema": ema_dict,
-            "text_encoder": text_encoder_dict
-        }
-
-    def load_state_dict(self, state_dict: dict[str, Any], strict: bool = True):
-        if self.should_update_ema:
-            ema_dict = state_dict["unet_ema"]
-            self.unet.load_state_dict(ema_dict["state_dict"])
-
-            self.unet_ema = ExponentialMovingAverage(self.unet.parameters(), ema_dict["decay"])
-            self.unet_ema.num_updates = ema_dict["num_updates"]
-
-        self.unet.load_state_dict(state_dict["unet"])
-
-        if hasattr(self.config.optim_target, "text_encoder") is not None:
-            self.condition_model.encoder.load_state_dict(state_dict["text_encoder"])
+        super().load_state_dict(state_dict, strict)
 
     @property
     def should_update_ema(self):
@@ -448,8 +402,7 @@ class LatentDiffusionModel(pl.LightningModule):
 
     def on_fit_start(self):
         if self.should_update_ema:
-            # Stored on RAM
-            self.unet_ema = ExponentialMovingAverage(self.unet.parameters(), self.config.ema.decay)
+            self.unet_ema = ExponentialMovingAverage(self.unet, self.config.ema.decay)
 
     def on_train_batch_end(self, outputs, batch: Any, batch_idx: int):
         # After optimizer step

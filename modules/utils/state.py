@@ -1,10 +1,10 @@
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 import torch
 
+ANYSTATE = dict[str, Any]
 STATE = dict[str, torch.Tensor]
-
 SUPPORTED_FORMATS = ["pt", "safetensors"]
 
 DTYPE_MAP = {
@@ -14,7 +14,7 @@ DTYPE_MAP = {
 }
 
 
-def infer_framework(state: STATE):
+def infer_framework(state: ANYSTATE):
     if any("model.diffusion_model." in k for k in state.keys()):
         return "ldm"
 
@@ -54,7 +54,7 @@ def save_state_dict(state: STATE, path: Path, _format: Optional[str] = None):
         assert False
 
 
-def load_state_dict(path: Path, device="cpu", _format: Optional[str] = None) -> STATE:
+def load_state_dict(path: Path, device="cpu", _format: Optional[str] = None) -> ANYSTATE:
     if _format is None:
         _format = infer_format(path)
 
@@ -74,3 +74,22 @@ def load_state_dict(path: Path, device="cpu", _format: Optional[str] = None) -> 
         assert False
 
     return state
+
+
+def where_prefix(d: ANYSTATE, prefix=""):
+    return {k: v for k, v in d.items() if k.startswith(prefix)}
+
+
+def replace_prefix(d: ANYSTATE, prefix="", replacement=""):
+    return {
+        replacement + k[len(prefix):]: v
+        for k, v in d.items()
+        if k.startswith(prefix)
+    }
+
+
+def cast_type(d: STATE, dtype: str | torch.dtype):
+    if isinstance(dtype, str):
+        dtype = DTYPE_MAP[dtype]
+
+    return {k: v.to(dtype) if v.dtype.is_floating_point else v for k, v in d.items()}
