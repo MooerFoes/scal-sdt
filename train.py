@@ -66,7 +66,7 @@ def get_loggers(config: DictConfig):
 
 @click.command()
 @click.option("--config", "config_path",
-              type=click.Path(exists=True, dir_okay=False),
+              type=click.Path(exists=True, dir_okay=False, path_type=Path),
               default=None,
               help="Path to the training config file.")
 @click.option("--run-id",
@@ -74,7 +74,7 @@ def get_loggers(config: DictConfig):
               default=None,
               help="Id of this run for saving checkpoint, defaults to current time formatted to yyddmm-HHMMSS.")
 @click.option("--resume", "resume_ckpt_path",
-              type=click.Path(exists=True, dir_okay=False),
+              type=click.Path(exists=True, dir_okay=False, path_type=Path),
               default=None,
               help="Resume from the specified checkpoint path. Corresponding config will be loaded if exists.")
 def main(config_path: Optional[Path],

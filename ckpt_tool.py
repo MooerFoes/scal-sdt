@@ -1,23 +1,25 @@
 import functools
 import logging
-import warnings
 from pathlib import Path
 from typing import Optional
 
 import click
 import torch
+from diffusers import AutoencoderKL
 from omegaconf import OmegaConf
 from torch import nn
+from transformers import CLIPTextModel
 
-from modules import configs
 from modules.configs import get_ldm_config
-from modules.convert.diffusers_to_sd import convert_unet_state_dict
+from modules.convert.diffusers_to_sd import convert_unet_state_dict, convert_vae_state_dict
 from modules.convert.sd_to_diffusers import convert_ldm_unet_checkpoint, create_unet_diffusers_config
 from modules.model import load_components
+from modules.text_encoders import CLIP_L
 from modules.utils.config import search_key
 from modules.utils.hof import try_then_default
 from modules.utils.io import check_overwrite
-from modules.utils.state import save_state_dict, load_state_dict, STATE, SUPPORTED_FORMATS, DTYPE_MAP
+from modules.utils.state import save_state_dict, load_state_dict, STATE, SUPPORTED_FORMATS, DTYPE_MAP, replace_prefix, \
+    cast_type
 from modules.utils.torch.module import apply_module_config
 
 logger = logging.getLogger("ckpt-tool")
@@ -31,82 +33,106 @@ def main():
 @main.command()
 @click.argument("checkpoint", type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path))
 @click.argument("output", type=click.Path(path_type=Path))
-@click.option("--text-encoder",
-              is_flag=True,
-              help="Whether to include text encoder weights.")
-@click.option("--vae",
-              type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
-              help="Path to VAE ckpt.")
 @click.option("--unet-dtype",
               type=click.Choice(DTYPE_MAP.keys()),
-              default="fp32",
-              help="Save unet weights in this data type.")
+              default="fp16",
+              help="Save UNet weights in this data type.")
+@click.option("--text-encoder",
+              is_flag=True,
+              help="Include text encoder weights.")
+@click.option("--text-encoder-dtype",
+              type=click.Choice(DTYPE_MAP.keys()),
+              default="fp16",
+              help="Save text encoder weights in data type.")
+@click.option("--vae",
+              type=click.Path(exists=True, file_okay=True, dir_okay=False, path_type=Path),
+              help="Include VAE weights. Path to a original LDM VAE or a checkpoint containing VAE.")
+@click.option("--df-vae",
+              type=str,
+              help="Include VAE weights. Name or path to a Diffusers VAE.")
 @click.option("--vae-dtype",
               type=click.Choice(DTYPE_MAP.keys()),
               default="fp32",
               help="Save VAE weights in this data type. (other than fp32 NOT RECOMMENDED)")
-@click.option("--text-encoder-dtype",
-              type=click.Choice(DTYPE_MAP.keys()),
-              default="fp32",
-              help="Save text encoder weights in data type.")
 @click.option("--overwrite",
               is_flag=True,
-              help="Whether to overwrite output")
+              help="Overwrite existing output.")
 @click.option("--map-location",
               type=str,
               default="cpu",
-              help='Where the checkpoint is loaded to. Could be "cpu" or "cuda".')
+              help='Tensors loading location. Example: "cpu", "cuda".')
 @click.option("--format",
               type=click.Choice(SUPPORTED_FORMATS),
               default=None,
-              help='Save in which format. If not specified, infered from output path extension.')
+              help="States saving format. If not specified, infered from output path extension.")
 @click.option("--ema",
               is_flag=True,
               help="Use EMA weights.")
-@torch.no_grad()
 def prune(checkpoint: Path,
           output: Path,
-          text_encoder: bool,
-          vae: Optional[Path],
           unet_dtype: str,
-          vae_dtype: str,
+          text_encoder: bool,
           text_encoder_dtype: str,
+          vae: Optional[Path],
+          df_vae: Optional[str],
+          vae_dtype: str,
           overwrite: bool,
           map_location: str,
           format: Optional[str],
           ema: bool):
-    """Prune a SCAL-SDT checkpoint.
+    """Convert a SCAL-SDT checkpoint for use on CompVis/StabilityAI LDM codebase.
 
     CHECKPOINT: Path to the SCAL-SDT checkpoint.
     OUTPUT: Output path."""
     check_overwrite(output, overwrite)
+    assert not (vae and df_vae), "Only one of --vae or --df-vae should be specified"
 
-    state_dict = load_state_dict(checkpoint, map_location)
+    ssdt_state = load_state_dict(checkpoint, map_location)
+    ldm_state = {}
 
-    if not ema:
-        unet_dict = {k: v.to(DTYPE_MAP[unet_dtype])
-                     for k, v in state_dict.items() if k.startswith("model.diffusion_model.")}
+    # region UNet
+    if ema:
+        unet_state = ssdt_state["unet_ema"]["shadow_params"]
     else:
-        unet_dict = {k: v.to(DTYPE_MAP[unet_dtype])
-                     for k, v in state_dict["unet_ema"]["state_dict"].items()}
+        unet_state = replace_prefix(ssdt_state, "unet.")
 
-    vae_dict = {}
+    unet_state = convert_unet_state_dict(unet_state)
+    unet_state = replace_prefix(unet_state, "", "model.diffusion_model.")
+    unet_state = cast_type(unet_state, unet_dtype)
+    ldm_state.update(unet_state)
+    # endregion
+
+    # region VAE
+    vae_state = None
+
     if vae is not None:
-        vae_dict = load_state_dict(vae, map_location)
-        vae_dict = {k: v.to(DTYPE_MAP[vae_dtype])
-                    for k, v in vae_dict.items() if k.startswith("first_stage_model.")}
+        vae_state = load_state_dict(vae, map_location)
+        vae_state_from_ldm = replace_prefix(vae_state, "first_stage_model.")
+        if any(vae_state_from_ldm.items()):
+            vae_state = vae_state_from_ldm
+        else:
+            vae_state = replace_prefix(vae_state, "", "first_stage_model.")
+    elif df_vae is not None:
+        vae_state = AutoencoderKL.from_pretrained(df_vae).state_dict()
+        vae_state = convert_vae_state_dict(vae_state)
+        vae_state = replace_prefix(vae_state, "", "first_stage_model.")
 
-    text_encoder_dict = {}
+    if vae_state is not None:
+        vae_state = cast_type(vae_state, vae_dtype)
+        ldm_state.update(vae_state)
+    # endregion
+
+    # region TE
     if text_encoder:
-        text_encoder_dict = {k: v.to(DTYPE_MAP[text_encoder_dtype])
-                             for k, v in state_dict.items() if k.startswith("cond_stage_model.transformer.")}
-        if not any(text_encoder_dict.items()):
-            warnings.warn("No text encoder weights were found in the checkpoint.")
+        te_state = replace_prefix(ssdt_state, "condition_model.encoder.text_model.", "cond_stage_model.transformer.")
+        if not any(te_state.items()):
+            te_state = CLIPTextModel.from_pretrained(CLIP_L).state_dict()
+            te_state = replace_prefix(te_state, "text_model.", "cond_stage_model.transformer.")
+        te_state = cast_type(te_state, text_encoder_dtype)
+        ldm_state.update(te_state)
+    # endregion
 
-    # Put together new checkpoint
-    state_dict = {**unet_dict, **vae_dict, **text_encoder_dict}
-
-    save_state_dict(state_dict, output, format)
+    save_state_dict(ldm_state, output, format)
 
 
 @main.command("lora")
@@ -114,20 +140,19 @@ def prune(checkpoint: Path,
 @click.argument("output", type=click.Path(path_type=Path))
 @click.option("--overwrite",
               is_flag=True,
-              help="Whether to overwrite output.")
+              help="Overwrite existing output.")
 @click.option("--map-location",
               type=str,
               default="cpu",
-              help='Where the checkpoint is loaded to. Could be "cpu" or "cuda".')
+              help='Tensors loading location. Example: "cpu", "cuda".')
 @click.option("--format",
               type=click.Choice(SUPPORTED_FORMATS),
               default=None,
-              help='Save in which format. If not specified, infered from output path extension.')
+              help="States saving format. If not specified, infered from output path extension.")
 @click.option("--dtype",
               type=click.Choice(DTYPE_MAP.keys()),
               default="fp16",
-              help='Save weights in this data type.')
-@torch.no_grad()
+              help="Save weights in this data type.")
 def extract_lora(checkpoint: Path,
                  output: Path,
                  overwrite: bool,
@@ -155,7 +180,7 @@ def extract_lora(checkpoint: Path,
 
     dtype = DTYPE_MAP[dtype]
 
-    state_dict = load_state_dict(checkpoint, map_location)
+    ssdt_state = load_state_dict(checkpoint, map_location)
 
     def to_kohya_format(state: STATE, prefix: str):
         lora_modules = set()
@@ -196,17 +221,17 @@ def extract_lora(checkpoint: Path,
 
         return result
 
-    unet_state = convert_ldm_unet_checkpoint(state_dict,
-                                             create_unet_diffusers_config(get_ldm_config(configs.default().ldm_config)))
+    lora_state = {}
+
+    unet_state = replace_prefix(ssdt_state, "unet.")
     unet_state = to_kohya_format(unet_state, "lora_unet")
+    lora_state.update(unet_state)
 
-    text_encoder_state = {k.removeprefix("cond_stage_model.transformer.text_model."): v for k, v in state_dict.items()
-                          if k.startswith("cond_stage_model.transformer.text_model.")}
-    text_encoder_state = to_kohya_format(text_encoder_state, "lora_te_text_model")
+    text_encoder_state = replace_prefix(ssdt_state, "condition_model.encoder.")
+    text_encoder_state = to_kohya_format(text_encoder_state, "lora_te")
+    lora_state.update(text_encoder_state)
 
-    state_dict = {**text_encoder_state, **unet_state}
-
-    save_state_dict(state_dict, output, format)
+    save_state_dict(lora_state, output, format)
 
 
 def load_as_diffusers_state(path: Path, device: str, ldm_config_path: Optional[str] = None):
@@ -221,8 +246,7 @@ def load_as_diffusers_state(path: Path, device: str, ldm_config_path: Optional[s
     else:
         state = load_state_dict(path, device)
         unet_state = convert_ldm_unet_checkpoint(state, create_unet_diffusers_config(get_ldm_config(ldm_config_path)))
-        clip_state = {k.replace("cond_stage_model.transformer.", "text_model."): v for k, v in state.items()
-                      if k.startswith("cond_stage_model.transformer.")}
+        clip_state = replace_prefix(state, "cond_stage_model.transformer.", "text_model.")
 
     return unet_state, clip_state
 
@@ -237,19 +261,19 @@ def load_as_diffusers_state(path: Path, device: str, ldm_config_path: Optional[s
               help="The layer specification, examples given at config/optim_targets.")
 @click.option("--overwrite",
               is_flag=True,
-              help="Allow overwriting output path if true.")
-@click.option("--device",
+              help="Overwrite existing output.")
+@click.option("--map-location",
               type=str,
               default="cpu",
-              help='Tensors loading location. Possible choices are "cpu" or "cuda".')
+              help='Tensors loading location. Example: "cpu", "cuda".')
 @click.option("--format",
               type=click.Choice(SUPPORTED_FORMATS),
               default=None,
-              help='State dict saving format. If not specified, infered from output path extension.')
+              help="States saving format. If not specified, infered from output path extension.")
 @click.option("--unet-dtype",
               type=click.Choice(DTYPE_MAP.keys()),
               default="fp32",
-              help="Save unet weights in this data type.")
+              help="Save UNet weights in this data type.")
 @click.option("--text-encoder-dtype",
               type=click.Choice(DTYPE_MAP.keys()),
               default="fp32",
@@ -262,13 +286,12 @@ def load_as_diffusers_state(path: Path, device: str, ldm_config_path: Optional[s
               type=str,
               default=None,
               help="Link or path to the LDM config.")
-@torch.no_grad()
 def graft(base_model_path: Path,
           model_paths: list[Path],
           output_path: Path,
           layer_spec: Path,
           overwrite: bool,
-          device: str,
+          map_location: str,
           format: str,
           unet_dtype: str,
           text_encoder_dtype: str,
@@ -302,7 +325,7 @@ def graft(base_model_path: Path,
             if source_index is None:
                 return
 
-            states = cached_load_as_diffusers_state(model_paths[source_index], device)
+            states = cached_load_as_diffusers_state(model_paths[source_index], map_location)
             submodule_state = {k.removeprefix(f"{p}."): v for k, v in states[i].items() if k.startswith(f"{p}.")}
             submodule.load_state_dict(submodule_state)
 
@@ -310,18 +333,21 @@ def graft(base_model_path: Path,
 
     logger.info("Process complete wrt layer specification")
 
+    ldm_state = {}
+
     unet_state = convert_unet_state_dict(base_unet.state_dict())
-    unet_state = {"model.diffusion_model." + k: v.to(DTYPE_MAP[unet_dtype]) for k, v in unet_state.items()}
+    unet_state = replace_prefix(unet_state, "", "model.diffusion_model.")
+    unet_state = cast_type(unet_state, unet_dtype)
+    ldm_state.update(unet_state)
 
     clip_state = base_clip.state_dict()
-    clip_state = {k: v.long() if v == "text_model.embeddings.position_ids" else v.to(DTYPE_MAP[text_encoder_dtype]) for
-                  k, v in clip_state.items()}
+    clip_state = cast_type(clip_state, text_encoder_dtype)
+    ldm_state.update(clip_state)
 
-    state = {**unet_state, **clip_state}
-
-    save_state_dict(state, output_path, format)
+    save_state_dict(ldm_state, output_path, format)
 
 
 if __name__ == '__main__':
     logging.basicConfig(level="INFO")
+    torch.set_grad_enabled(False)
     main()
