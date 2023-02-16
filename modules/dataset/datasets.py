@@ -26,20 +26,34 @@ class Concept:
 
 
 @dataclass
-class Item:
+class TextConditionalItem:
     id: int
-    prompt: str
+    text: str
     image: torch.Tensor
 
 
 @dataclass
-class CacheItem:
+class TextConditionalItemCached:
     id: int
     latent: torch.Tensor
     condition: torch.Tensor
 
 
-ItemType = Item | CacheItem
+ItemTypeTextConditional = TextConditionalItem | TextConditionalItemCached
+
+
+@dataclass
+class TextImageConditionalItem(TextConditionalItem):
+    cond_image: torch.Tensor
+
+
+@dataclass
+class PriorPreservationItem:
+    instance: ItemTypeTextConditional
+    prior: ItemTypeTextConditional
+
+
+ItemTypeAll = ItemTypeTextConditional | PriorPreservationItem | TextImageConditionalItem
 
 
 @dataclass
@@ -48,8 +62,8 @@ class Index:
     size: Size
 
 
-class ImagePromptDataset(Dataset[ItemType]):
-    PLACEHOLDER_TXT_PROMPT = "{TXT_PROMPT}"
+class TextConditionalDataset(Dataset[ItemTypeTextConditional]):
+    PLACEHOLDER_TXT_TEXT = "{TXT_PROMPT}"
 
     def __init__(self,
                  concepts: Collection[Concept],
@@ -57,7 +71,7 @@ class ImagePromptDataset(Dataset[ItemType]):
                  augment_config: Optional[ListConfig] = None,
                  cache_file: Optional[str | PathLike] = None):
         self.dir_prompt_map = {Path(concept.path): concept.prompt for concept in concepts}
-        self.image_paths = list(list_images(*self.dir_prompt_map.keys()))
+        self.image_paths = self._list_images(self.dir_prompt_map)
         self.center_crop = center_crop
 
         self.cache: Optional[safe_open] = None
@@ -71,16 +85,19 @@ class ImagePromptDataset(Dataset[ItemType]):
             self.cache = safe_open(cache_file, framework="pt", device="cpu")
             self._cache_metadata = json.loads(self.cache.metadata()["json"])
 
+    def _list_images(self, dir_prompt_map):
+        return list(list_images(*dir_prompt_map.keys()))
+
     def __getitem__(self, index: Index):
         if self.cache is None:
             path = self.image_paths[index.value]
-            return Item(
+            return TextConditionalItem(
                 id=index.value,
-                image=self._read_and_transform(path, index.size),
-                prompt=self._get_prompt(path)
+                image=self._augment(self._read_and_transform(path, index.size)),
+                text=self._get_text(path)
             )
         else:
-            return CacheItem(
+            return TextConditionalItemCached(
                 id=index.value,
                 latent=self.cache.get_tensor(
                     f"{index.value}.latent.{random.randint(0, self._cache_metadata['aug_group_size'] - 1)}"),
@@ -90,22 +107,25 @@ class ImagePromptDataset(Dataset[ItemType]):
     def __len__(self) -> int:
         return len(self.image_paths) if self.cache is None else self._cache_metadata["total_entries"]
 
-    def _get_prompt(self, path: Path) -> str:
-        prompt = self.dir_prompt_map[path.parent]
+    def _get_text(self, path: Path) -> str:
+        text = self.dir_prompt_map[path.parent]
 
-        if prompt is None:
-            prompt = self.PLACEHOLDER_TXT_PROMPT
-        elif self.PLACEHOLDER_TXT_PROMPT not in prompt:
-            return prompt
+        if text is None:
+            text = self.PLACEHOLDER_TXT_TEXT
+        elif self.PLACEHOLDER_TXT_TEXT not in text:
+            return text
 
         txt_path = path.with_suffix('.txt')
         assert txt_path.is_file(), f'Image "{path}" does not have corresponding prompt txt'
 
         txt_prompt = txt_path.read_text()
-        prompt = prompt.replace(self.PLACEHOLDER_TXT_PROMPT, txt_prompt)
-        return prompt
+        text = text.replace(self.PLACEHOLDER_TXT_TEXT, txt_prompt)
+        return text
 
     def _augment(self, image: torch.Tensor) -> torch.Tensor:
+        if self._augment_transforms is None:
+            return image
+
         w, h = image.shape[-1], image.shape[-2]
         image = self._augment_transforms(image)
         image = transforms.Resize((h, w), interpolation=transforms.InterpolationMode.BICUBIC, antialias=True)(image)
@@ -121,10 +141,35 @@ class ImagePromptDataset(Dataset[ItemType]):
                 transforms.ToTensor()
             ]
         )(pil_image)
-        if self._augment_transforms is not None:
-            image = self._augment(image)
         image = transforms.Normalize([0.5], [0.5])(image)
         return image
+
+
+class TextImageConditionalDataset(TextConditionalDataset):
+    SUFFIX_COND_IMAGE = "_cond-image"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def _list_images(self, dir_prompt_map):
+        return list(filter(lambda x: not x.stem.endswith(self.SUFFIX_COND_IMAGE),
+                           list_images(*self.dir_prompt_map.keys())))
+
+    def __getitem__(self, index: Index):
+        if self.cache is not None:
+            raise NotImplementedError("Cache is not implemented")
+
+        path = self.image_paths[index.value]
+        return TextImageConditionalItem(
+            id=index.value,
+            image=self._augment(self._read_and_transform(path, index.size)),
+            text=self._get_text(path),
+            cond_image=self._get_cond_image(path, index.size)
+        )
+
+    def _get_cond_image(self, path: Path, size: Size) -> torch.Tensor:
+        cond_image = path.with_stem(path.stem + self.SUFFIX_COND_IMAGE)
+        return self._read_and_transform(cond_image, size)
 
 
 def get_id_size_map(image_paths: Iterable[Path]):
@@ -137,7 +182,7 @@ def get_id_size_map(image_paths: Iterable[Path]):
     return id_size_map
 
 
-class AspectDataset(ImagePromptDataset):
+class AspectTextConditionalDataset(TextConditionalDataset):
     def __init__(self, *args, debug=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.debug = debug
@@ -208,18 +253,22 @@ class AspectDataset(ImagePromptDataset):
         return w_t, h_t
 
 
-class DBDataset(Dataset[tuple[ItemType, ItemType]]):
+class AspectTextImageConditionalDataset(TextImageConditionalDataset, AspectTextConditionalDataset):
+    pass
+
+
+class PriorPreservationDataset(Dataset[PriorPreservationItem]):
 
     def __init__(self,
-                 instance_set: ImagePromptDataset | AspectDataset,
-                 class_set: ImagePromptDataset | AspectDataset):
+                 instance_set: TextConditionalDataset | AspectTextConditionalDataset,
+                 class_set: TextConditionalDataset | AspectTextConditionalDataset):
         self.instance_set = instance_set
         self.class_set = class_set
 
     def __len__(self) -> int:
         return len(self.instance_set)
 
-    def __getitem__(self, index: tuple[Index, Index]) -> tuple[ItemType, ItemType]:
+    def __getitem__(self, index: tuple[Index, Index]) -> PriorPreservationItem:
         instance = self.instance_set[index[0]]
-        class_ = self.class_set[index[1]]
-        return instance, class_
+        prior = self.class_set[index[1]]
+        return PriorPreservationItem(instance, prior)

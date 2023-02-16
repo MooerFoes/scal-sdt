@@ -1,4 +1,5 @@
 import contextlib
+import inspect
 import itertools
 from dataclasses import dataclass
 from typing import Optional, Any
@@ -214,6 +215,13 @@ class ControlNet(ModelMixin, ConfigMixin):
 
         # endregion
 
+    @classmethod
+    def from_unet_config(cls, config: dict[str, Any]):
+        params = inspect.signature(cls.__init__).parameters
+        params = {k: v for k, v in config.items() if k in params}
+        controlnet = cls(**params)
+        return controlnet
+
     @property
     def attn_processors(self) -> dict[str, AttnProcessor]:
         r"""
@@ -347,17 +355,20 @@ class ControlNet(ModelMixin, ConfigMixin):
 
             controls = self.forward(*args, image_condition=image_condition, **kwargs)
 
+            down_hs = [x.to(unet.dtype) for x in controls.down_connect_hidden_states]
+            mid_hs = controls.mid_connect_hidden_state.to(unet.dtype)
+
             return controlled_forward(
                 unet,
                 *args,
-                down_connect_hidden_states=controls.down_connect_hidden_states,
-                mid_connect_hidden_state=controls.mid_connect_hidden_state,
+                down_connect_hidden_states=down_hs,
+                mid_connect_hidden_state=mid_hs,
                 **kwargs
             )
 
         unet.forward = hook_forward
         try:
-            yield unet
+            yield
         finally:
             unet.forward = original_forward
 

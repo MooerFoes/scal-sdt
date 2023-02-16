@@ -1,3 +1,4 @@
+import contextlib
 import logging
 import math
 import warnings
@@ -9,7 +10,7 @@ import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
 import torch.utils.data
-from diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel, StableDiffusionPipeline
+from diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel
 from omegaconf import DictConfig, OmegaConf, ListConfig
 from torch import nn
 from tqdm import tqdm
@@ -17,6 +18,7 @@ from transformers import CLIPTextModel
 
 from . import text_encoders
 from .configs import OPTIM_TARGETS_DIR, get_ldm_config
+from .controlnet import ControlNet
 from .dataset import get_dataset, get_sampler, collate_fn
 from .ema import ExponentialMovingAverage
 from .lora import get_lora
@@ -172,30 +174,32 @@ class LatentDiffusionModel(pl.LightningModule):
                  unet: UNet2DConditionModel,
                  scheduler,
                  vae: AutoencoderKL,
-                 condition_model: CLIPTextEncoder):
+                 condition_model: CLIPTextEncoder,
+                 controlnet: Optional[ControlNet] = None):
         super().__init__()
 
         vae.requires_grad_(False)
         vae.eval()
 
-        self.param_groups = self._config_net(config.optim_target, unet, condition_model.encoder)
+        self.param_groups = self._config_net(config.optim_target, unet, condition_model.encoder, controlnet)
 
         if config.gradient_checkpointing:
             unet.enable_gradient_checkpointing()
             condition_model.encoder.gradient_checkpointing_enable()
+            if controlnet is not None:
+                controlnet.enable_gradient_checkpointing()
 
         if config.xformers:
             unet.set_use_memory_efficient_attention_xformers(True)
-
-        self.pipeline = StableDiffusionPipeline(vae, condition_model.encoder, condition_model.tokenizer, unet,
-                                                scheduler, None, None, False)
-        self.pipeline.set_progress_bar_config(disable=True)
+            if controlnet is not None:
+                controlnet.set_use_memory_efficient_attention_xformers(True)
 
         self.config = config
         self.unet = unet
         self.scheduler = scheduler
         self.vae = vae
         self.condition_model = condition_model
+        self.controlnet = controlnet
 
         self.save_hyperparameters(config)
 
@@ -213,18 +217,29 @@ class LatentDiffusionModel(pl.LightningModule):
             logger.info(f"Loaded total of {len(embs)} custom embeddings")
             text_encoder.init_custom_embeddings(embs)
 
+        controlnet = None
+        if config.controlnet.enabled:
+            controlnet = ControlNet.from_unet_config(unet.config)
+            if config.controlnet.source is not None:
+                state = load_state_dict(Path(config.controlnet.source))
+                controlnet.load_state_dict(state)
+
         if isinstance(config.optim_target, str):
             config.optim_target = OmegaConf.load(OPTIM_TARGETS_DIR / (config.optim_target + ".yaml"))
         else:
             assert isinstance(config.optim_target, DictConfig)
 
-        return cls(config, unet, scheduler, vae, text_encoder)
+        return cls(config, unet, scheduler, vae, text_encoder, controlnet)
 
     @staticmethod
-    def _config_net(config: DictConfig, unet: UNet2DConditionModel, text_encoder: CLIPTextModel):
+    def _config_net(config: DictConfig, unet: UNet2DConditionModel,
+                    text_encoder: CLIPTextModel, controlnet: Optional[ControlNet]):
         param_groups = list[dict[str, Any]]()
 
-        def _add_component(component_config: Optional[DictConfig], component: nn.Module):
+        def _add_component(component_config: Optional[DictConfig], component: Optional[nn.Module]):
+            if component is None:
+                return
+
             params = []
 
             if component_config is not None:
@@ -238,6 +253,7 @@ class LatentDiffusionModel(pl.LightningModule):
 
         _add_component(config.get("unet"), unet)
         _add_component(config.get("text_encoder"), text_encoder)
+        _add_component(config.get("controlnet"), controlnet)
 
         return param_groups
 
@@ -267,7 +283,7 @@ class LatentDiffusionModel(pl.LightningModule):
 
         return latents
 
-    def _get_condition(self, prompts: Sequence[str]):
+    def _get_text_condition(self, prompts: Sequence[str]):
         uc_conf = self.config.uncond
 
         if not (uc_conf.enabled and torch.rand(1) < uc_conf.p):
@@ -286,9 +302,10 @@ class LatentDiffusionModel(pl.LightningModule):
             case _:
                 raise Exception("Invalid uncond.cond")
 
-    def _denoise_loss(self, latents, conds):
-        latents.to(self.unet.dtype)
-        conds.to(self.unet.dtype)
+    def _denoise_loss(self, latents: torch.Tensor,
+                      cond_xattn: torch.Tensor, cond_image: Optional[torch.Tensor] = None):
+        latents = latents.to(self.unet.dtype)
+        cond_xattn = cond_xattn.to(self.unet.dtype)
 
         # Sample noise that we'll add to the latents
         noise = torch.randn_like(latents)
@@ -301,7 +318,14 @@ class LatentDiffusionModel(pl.LightningModule):
         # (this is the forward diffusion process)
         noisy_latents = self.scheduler.add_noise(latents, noise, timesteps)
 
-        pred = self.unet(noisy_latents, timesteps, conds).sample
+        if cond_image is None:
+            context = contextlib.nullcontext()
+        else:
+            cond_image = cond_image.to(self.controlnet.dtype)
+            context = self.controlnet.control(self.unet, cond_image)
+
+        with context:
+            pred = self.unet(noisy_latents, timesteps, cond_xattn).sample
 
         match self.scheduler.config.prediction_type:
             case "epsilon":
@@ -316,22 +340,24 @@ class LatentDiffusionModel(pl.LightningModule):
         return F.mse_loss(pred, target, reduction="none")
 
     def training_step(self, batch, batch_idx):
-        if "latents" in batch:
-            latents = batch["latents"]
+        if "latent" in batch:
+            latent = batch["latent"]
         else:
-            latents = self._vae_encode(batch["images"])
+            latent = self._vae_encode(batch["image"])
 
-        raise_if_nan(latents, "VAE output")
+        raise_if_nan(latent, "VAE output")
 
         # Get the text embedding for conditioning
-        if "conds" in batch:
-            conds = batch["conds"]
+        if "cond_text" in batch:
+            cond_xattn = batch["cond_text"]
         else:
-            conds = self._get_condition(batch["prompts"])
+            cond_xattn = self._get_text_condition(batch["text"])
 
-        raise_if_nan(conds, "text encoder output")
+        raise_if_nan(cond_xattn, "text encoder output")
 
-        loss = self._denoise_loss(latents, conds)
+        cond_image = batch.get("cond_image")
+
+        loss = self._denoise_loss(latent, cond_xattn, cond_image)
 
         raise_if_nan(loss, "loss")
 

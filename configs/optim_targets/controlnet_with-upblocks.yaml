@@ -1,0 +1,7 @@
+unet:
+  targets:
+    - index: [ 'up_blocks.0', 'up_blocks.1', 'up_blocks.2', 'up_blocks.3' ]
+
+controlnet:
+  targets:
+    - { }

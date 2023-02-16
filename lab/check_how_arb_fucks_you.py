@@ -6,7 +6,7 @@ import click
 parent = str(Path(__file__).parent.parent.absolute())
 sys.path.append(parent)
 
-from modules.dataset import AspectDataset
+from modules.dataset import AspectTextConditionalDataset
 from modules.dataset.bucket import BucketManager
 
 
@@ -25,7 +25,7 @@ def meta_single_image(width, height, dim):
 
     best_fit = next(b for b in manager.buckets if any(b.ids))
     error = abs(best_fit.aspect - aspect)
-    before_crop = AspectDataset._perserve_ratio_size((width, height), best_fit.size)
+    before_crop = AspectTextConditionalDataset._perserve_ratio_size((width, height), best_fit.size)
 
     resolutions = [bucket.size for bucket in manager.buckets]
 

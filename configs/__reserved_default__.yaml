@@ -66,6 +66,10 @@ ema:
   enabled: false
   decay: 0.995
 
+controlnet:
+  enabled: false
+  source: null
+
 loggers: { }
 
 optimizer:

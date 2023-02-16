@@ -6,7 +6,7 @@ from torch.utils.data import Sampler
 
 from . import Size
 from .bucket import BucketManager
-from .datasets import ImagePromptDataset, DBDataset, Index, AspectDataset
+from .datasets import TextConditionalDataset, PriorPreservationDataset, Index, AspectTextConditionalDataset
 
 
 def scale_bucket_params(dim: int, c_size: float, c_dim: float, c_div: float):
@@ -37,7 +37,7 @@ def get_gen_bucket_params(dim: int, bucket_config: DictConfig):
 class ConstantSizeSampler(Sampler):
 
     def __init__(self,
-                 data_source: ImagePromptDataset,
+                 data_source: TextConditionalDataset,
                  size: int):
         super().__init__(data_source)
         self._len = len(data_source)
@@ -54,7 +54,7 @@ class ConstantSizeSampler(Sampler):
 class ConstantSizeSamplerDB(Sampler):
 
     def __init__(self,
-                 data_source: DBDataset,
+                 data_source: PriorPreservationDataset,
                  size: int):
         super().__init__(data_source)
         self._len = len(data_source.instance_set)
@@ -73,7 +73,7 @@ class ConstantSizeSamplerDB(Sampler):
 class AspectSampler(Sampler):
 
     def __init__(self,
-                 data_source: AspectDataset,
+                 data_source: AspectTextConditionalDataset,
                  base_size: int,
                  bucket_config: DictConfig,
                  batch_size: int,
@@ -107,7 +107,7 @@ class AspectSampler(Sampler):
 class AspectSamplerDB(Sampler):
 
     def __init__(self,
-                 data_source: DBDataset,
+                 data_source: PriorPreservationDataset,
                  base_size: int,
                  bucket_config: DictConfig,
                  batch_size: int,

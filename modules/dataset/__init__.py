@@ -1,4 +1,5 @@
 from collections.abc import Iterable
+from typing import Any
 
 import torch
 from omegaconf import DictConfig
@@ -6,13 +7,24 @@ from omegaconf import DictConfig
 Size = tuple[int, int]
 
 from .samplers import ConstantSizeSampler, AspectSampler, AspectSamplerDB, ConstantSizeSamplerDB
-from .datasets import Item, Concept, ImagePromptDataset, DBDataset, AspectDataset, CacheItem, ItemType
+from .datasets import TextConditionalItem, Concept, TextConditionalDataset, PriorPreservationDataset, \
+    AspectTextConditionalDataset, \
+    TextConditionalItemCached, ItemTypeTextConditional, ItemTypeAll, PriorPreservationItem, TextImageConditionalItem, \
+    TextImageConditionalDataset, AspectTextImageConditionalDataset
 
-SSDT_Dataset = ImagePromptDataset | AspectDataset | DBDataset
+SSDT_Dataset = (TextConditionalDataset | AspectTextConditionalDataset |
+                TextImageConditionalDataset | AspectTextImageConditionalDataset |
+                PriorPreservationDataset)
 
 
 def get_dataset(config: DictConfig, use_cache=True):
-    dataset_type = ImagePromptDataset if not config.aspect_ratio_bucket.enabled else AspectDataset
+    if config.controlnet.enabled:
+        dataset_type = \
+            AspectTextImageConditionalDataset if config.aspect_ratio_bucket.enabled else TextImageConditionalDataset
+    else:
+        dataset_type = \
+            AspectTextConditionalDataset if config.aspect_ratio_bucket.enabled else TextConditionalDataset
+
     dataset_params = {
         "center_crop": config.data.center_crop,
         "augment_config": config.get("augment"),
@@ -30,7 +42,7 @@ def get_dataset(config: DictConfig, use_cache=True):
                       for concept in config.data.concepts]
     class_set = dataset_type(class_concepts, **dataset_params)
 
-    return DBDataset(instance_set, class_set)
+    return PriorPreservationDataset(instance_set, class_set)
 
 
 def get_sampler(dataset: SSDT_Dataset, config: DictConfig, world_size: int, global_rank: int):
@@ -51,34 +63,40 @@ def get_sampler(dataset: SSDT_Dataset, config: DictConfig, world_size: int, glob
     return sampler_type(**arb_params)
 
 
-def collate_fn(batch: Iterable[ItemType | tuple[ItemType, ItemType]]):
-    prompt_array = list[str]()
-    image_array = list[torch.Tensor]()
+def collate_fn(batch: Iterable[ItemTypeAll]) -> dict[str, Any]:
+    ids = list[int]()
+
+    image = list[torch.Tensor]()
+
+    # Conds
+    text = list[str]()
+    cond_image = list[torch.Tensor]()
 
     # Cache
-    conditions_array = list[torch.Tensor]()
-    latents_array = list[torch.Tensor]()
+    latent = list[torch.Tensor]()
+    cond_text = list[torch.Tensor]()
 
-    ids = list[int]()
+    def append(item: ItemTypeTextConditional | TextImageConditionalItem):
+        ids.append(item.id)
+
+        if isinstance(item, TextConditionalItem):
+            image.append(item.image)
+            text.append(item.text)
+        elif isinstance(item, TextConditionalItemCached):
+            latent.append(item.latent)
+            cond_text.append(item.condition)
+        else:
+            assert False
+
+        if isinstance(item, TextImageConditionalItem):
+            cond_image.append(item.cond_image)
 
     class_items = []
 
-    def append(item: ItemType):
-        ids.append(item.id)
-        if isinstance(item, Item):
-            prompt_array.append(item.prompt)
-            image_array.append(item.image)
-        elif isinstance(item, CacheItem):
-            conditions_array.append(item.condition)
-            latents_array.append(item.latent)
-        else:
-            raise Exception()
-
     for x in batch:
-        if isinstance(x, tuple):
-            instance_item, class_item = x
-            append(instance_item)
-            class_items.append(class_item)
+        if isinstance(x, PriorPreservationItem):
+            append(x.instance)
+            class_items.append(x.prior)
         else:
             append(x)
 
@@ -87,12 +105,14 @@ def collate_fn(batch: Iterable[ItemType | tuple[ItemType, ItemType]]):
 
     result = {"ids": ids}
 
-    if any(latents_array):
-        result["latents"] = torch.stack(latents_array)
-        if any(conditions_array):
-            result["conds"] = torch.stack(conditions_array)
+    if len(latent) != 0:
+        result["latent"] = torch.stack(latent)
+        if len(cond_text) != 0:
+            result["cond_text"] = torch.stack(cond_text)
     else:
-        result["prompts"] = prompt_array
-        result["images"] = torch.stack(image_array)
+        result["text"] = text
+        result["image"] = torch.stack(image)
+        if len(cond_image) != 0:
+            result["cond_image"] = torch.stack(cond_image)
 
     return result
