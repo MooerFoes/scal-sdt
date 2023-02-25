@@ -96,8 +96,8 @@ def main(model: Path,
         else:
             return load_df_pipeline(str(path))
 
-    unet, _, text_encoder, _, _ = load_components(model)
-    unet_base, _, text_encoder_base, _, _ = load_components(base_model)
+    unet, _, text_encoder, _ = load_components(model)
+    unet_base, _, text_encoder_base, _ = load_components(base_model)
 
     logger.info("Weights loaded")
 
@@ -109,7 +109,7 @@ def main(model: Path,
 
     for prefix, module, module_base, module_config in \
             [("lora_unet", unet, unet_base, unet_config),
-             ("lora_te_text_model", text_encoder, text_encoder_base, text_encoder_config)]:
+             ("lora_te_text_model", text_encoder.encoder, text_encoder_base.encoder, text_encoder_config)]:
         if module_config is None:
             continue
 
